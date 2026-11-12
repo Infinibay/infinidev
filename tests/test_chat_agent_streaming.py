@@ -29,6 +29,14 @@ from infinidev.engine.orchestration.chat_agent import (
 
 
 @pytest.fixture(autouse=True)
+def stub_semantic_routing(monkeypatch):
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.chat_agent.classify_chat_response",
+        lambda *a, **kw: None,
+    )
+
+
+@pytest.fixture(autouse=True)
 def _single_stage_planner(monkeypatch):
     """Develop-path streaming tests use the real staged pipeline deterministically."""
     from infinidev.config.settings import settings
@@ -96,6 +104,7 @@ class _Choice:
 @dataclass
 class _Chunk:
     choices: list[_Choice]
+    usage: Any = None
 
 
 def _tc_chunk(
@@ -114,6 +123,54 @@ def _content_chunk(text: str) -> _Chunk:
     return _Chunk(choices=[_Choice(delta=_Delta(content=text))])
 
 
+@pytest.mark.parametrize("provider, model", [
+    ("llama_cpp", "custom_openai/test"),
+    ("ollama", "ollama/test"),
+])
+def test_chat_stream_reports_final_usage_including_tool_schemas(monkeypatch, provider, model):
+    from types import SimpleNamespace
+
+    from infinidev.config.settings import settings
+    from infinidev.engine.orchestration import chat_agent
+
+    monkeypatch.setattr(settings, "LLM_PROVIDER", provider)
+    monkeypatch.setattr(
+        chat_agent, "get_litellm_params_for_behavior", lambda: {"model": model},
+    )
+    sent = []
+    counted = []
+    schemas = [{"type": "function", "function": {"name": "respond", "parameters": {}}}]
+
+    def completion(**kwargs):
+        sent.append(kwargs)
+        return iter([
+            _content_chunk("Here is the answer."),
+            _Chunk(choices=[], usage=SimpleNamespace(prompt_tokens=24_680)),
+        ])
+
+    def token_counter(**kwargs):
+        counted.append(kwargs)
+        return 111
+
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr("litellm.token_counter", token_counter)
+    hooks = _RecordingHooks()
+
+    result = chat_agent._run_llm_loop(
+        messages=[{"role": "user", "content": "hello"}], tool_schemas=schemas,
+        dispatch={}, user_input="hello", max_iterations=1, hooks=hooks,
+    )
+
+    assert result.kind == "respond"
+    assert result.reply == "Here is the answer."
+    assert counted[0]["tools"] == schemas
+    assert hooks.token_counts[-1] == (24_680, "chat")
+    if provider == "llama_cpp":
+        assert sent[0]["stream_options"]["include_usage"] is True
+    else:
+        assert "stream_options" not in sent[0]
+
+
 class _RecordingHooks:
     """Captures notify_stream_chunk and notify_stream_end calls verbatim."""
 
@@ -121,6 +178,10 @@ class _RecordingHooks:
         self.chunks: list[tuple[str, str, str]] = []
         self.messages: list[tuple[str, str, str]] = []
         self.stream_ends: list[tuple[str, str]] = []
+        self.token_counts: list[tuple[int, str]] = []
+
+    def notify_token_usage(self, prompt_tokens: int, lane: str = "chat") -> None:
+        self.token_counts.append((prompt_tokens, lane))
 
     def on_phase(self, phase: str) -> None: pass
     def on_status(self, level: str, msg: str) -> None: pass

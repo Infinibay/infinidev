@@ -10,13 +10,14 @@ system prompt alone is ~4 400 tokens before a single tool schema or tool
 result, so a turn carrying tens of thousands displayed 108.
 
 ``usage`` is the truth when the provider sends it. A streamed response carries
-none unless the caller asked for it, so the fallback counts the message list
-that was just sent — still a measurement of the real prompt, not a guess at
+none unless the caller asked for it, so the fallback counts the messages and tool schemas
+that were just sent — still a measurement of the real prompt, not a guess at
 one fragment of it.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -31,22 +32,34 @@ def _usage_tokens(response: Any) -> int:
         return 0
 
 
-def _count_messages(messages: list[dict] | None, model: str) -> int:
-    """Token count of the messages actually sent, tools excluded.
-
-    A floor rather than the exact figure: the tool schemas travel with the
-    request and are not counted here. Still the right order of magnitude,
-    which is the whole point of the meter.
-    """
-    if not messages:
+def _count_messages(
+    messages: list[dict] | None,
+    model: str,
+    *,
+    tools: list[dict] | None = None,
+) -> int:
+    """Estimate the complete prompt, including any tool schemas sent with it."""
+    if not messages and not tools:
         return 0
     try:
         import litellm
 
-        return int(litellm.token_counter(model=model or "gpt-4", messages=messages))
+        kwargs: dict[str, Any] = {"model": model or "gpt-4", "messages": messages or []}
+        if tools:
+            kwargs["tools"] = tools
+        return int(litellm.token_counter(**kwargs))
     except Exception:
-        chars = sum(len(str(m.get("content") or "")) for m in messages)
-        return chars // 4
+        try:
+            payload: dict[str, Any] = {"messages": messages or []}
+            if tools:
+                payload["tools"] = tools
+            # Include framing and schema keys; three chars/token errs above the
+            # usual four-char heuristic when the model tokenizer is unavailable.
+            chars = len(json.dumps(payload, ensure_ascii=False, default=str))
+            return (chars + 2) // 3
+        except Exception:
+            logger.debug("prompt size estimation failed", exc_info=True)
+            return 0
 
 
 def report_prompt_tokens(
@@ -56,6 +69,7 @@ def report_prompt_tokens(
     lane: str = "chat",
     messages: list[dict] | None = None,
     model: str = "",
+    tools: list[dict] | None = None,
 ) -> int:
     """Forward one call's real prompt size to whoever is metering.
 
@@ -64,7 +78,7 @@ def report_prompt_tokens(
     """
     tokens = _usage_tokens(response)
     if tokens <= 0:
-        tokens = _count_messages(messages, model)
+        tokens = _count_messages(messages, model, tools=tools)
     if tokens <= 0 or hooks is None:
         return tokens
     notify = getattr(hooks, "notify_token_usage", None)

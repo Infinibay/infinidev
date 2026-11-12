@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from infinidev.engine.oversized_result import (
     OVERSIZED_ERROR,
     DuplicateCallGuard,
@@ -77,6 +79,83 @@ class TestFileReadIsRefusedNotTruncated:
 
     def test_the_refusal_is_far_smaller_than_the_truncation_it_replaced(self):
         assert len(self._refuse()) < 1000
+
+
+class TestExplicitRangeKeepsContent:
+    @pytest.mark.parametrize("range_args", [
+        {"limit": 120},
+        {"offset": 1, "limit": 96},
+        {"offset": 1},
+        {"start_line": 1, "end_line": 120},
+        {"end_line": 120},
+        {"line_range": "1-120"},
+    ])
+    def test_current_prose_survives_an_oversized_selected_range(self, range_args):
+        text = _numbered([
+            "Current state: revision 8a3b is deployed.",
+            *["Current details " * 20] * 70,
+            "## Historical state: revision old",
+            *["Historical details " * 20] * 48,
+        ])
+        if "limit" in range_args:
+            text = "\n".join(text.splitlines()[:range_args["limit"]])
+        out = handle_oversized_result(
+            text, max_chars=8000, tool_name="read_file",
+            tool_args=json.dumps({"file_path": "notes.md", **range_args}),
+        )
+        assert "Current state: revision 8a3b is deployed." in out
+        assert "Historical state" not in out
+        assert "NOTHING was read" not in out
+        assert not is_oversized_refusal(out)
+        assert len(out) <= 8000
+        shown = [line for line in out.splitlines() if "\t" in line]
+        assert shown == text.splitlines()[:len(shown)]
+        last = int(shown[-1].partition("\t")[0])
+        assert f"offset={last + 1}" in out
+        assert f"limit={len(text.splitlines()) - last}" in out
+
+    @pytest.mark.parametrize("tool_name,offset_arg", [
+        ("read_file", "offset"), ("partial_read", "start_line"),
+    ])
+    def test_noninitial_range_resumes_at_first_unshown_line(self, tool_name, offset_arg):
+        text = "\n".join(
+            f"{i:6d}\tselected content {i} " + "x" * 100
+            for i in range(101, 121)
+        )
+        out = handle_oversized_result(
+            text, max_chars=1000, tool_name=tool_name,
+            tool_args={"file_path": "source.py", offset_arg: 101, "limit": 20},
+        )
+        assert "selected content 101" in out
+        assert len(out) <= 1000
+        shown = [line for line in out.splitlines() if "\t" in line]
+        last = int(shown[-1].partition("\t")[0])
+        assert f"{offset_arg}={last + 1}" in out
+        assert f"limit={120 - last}" in out
+        assert "of requested result 101-120" in out
+
+    def test_annotations_over_cap_do_not_claim_requested_lines_are_missing(self):
+        text = _numbered(["first paragraph", "last paragraph"])
+        out = handle_oversized_result(
+            text + "\n" + "tool metadata " * 200,
+            max_chars=1000, tool_name="read_file",
+            tool_args={"file_path": "notes.md", "limit": 2},
+        )
+        assert out.startswith(text)
+        assert "All requested lines" in out
+        assert "limit=0" not in out
+        assert len(out) <= 1000
+
+    def test_one_line_larger_than_cap_is_not_presented_as_a_complete_line(self):
+        out = handle_oversized_result(
+            _numbered(["oversized paragraph " * 1000, "next paragraph"]),
+            max_chars=1000, tool_name="read_file",
+            tool_args={"file_path": "notes.md", "limit": 2},
+        )
+        assert len(out) <= 1000
+        assert "No complete line" in out
+        assert "line 1" in out
+        assert "oversized paragraph" not in out
 
 
 class TestTheOutline:

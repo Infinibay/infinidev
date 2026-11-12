@@ -40,7 +40,7 @@ def test_the_reported_message_renders_as_text():
 
 
 def test_surrogate_pairs_become_one_character():
-    """``\ud83d\udc4b`` is one emoji carried as a UTF-16 pair; decoding the
+    r"""``\ud83d\udc4b`` is one emoji carried as a UTF-16 pair; decoding the
     halves separately would leave unencodable lone surrogates."""
     decoded = normalize_message_text(r"\ud83d\ude80 rocket")
     assert decoded == "🚀 rocket"

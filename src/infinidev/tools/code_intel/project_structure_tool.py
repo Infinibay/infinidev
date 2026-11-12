@@ -88,6 +88,8 @@ class ProjectStructureTool(InfinibayBaseTool):
             try:
                 entries = sorted(os.listdir(dirpath))
             except PermissionError:
+                if current_depth == 1:
+                    raise
                 return
 
             dirs = []
@@ -116,11 +118,14 @@ class ProjectStructureTool(InfinibayBaseTool):
                 else:
                     lines.append(f"{prefix}{f}")
 
-        _walk(file_path, 1, "")
-
-        if not lines:
-            return self._error(f"Empty directory: {file_path}")
+        try:
+            _walk(file_path, 1, "")
+        except PermissionError:
+            return self._error(f"Cannot read directory: {file_path}")
 
         header = f"Project structure of {file_path} (depth={depth}):"
+        if not lines:
+            return header + "\n(no visible files or directories)"
+
         return header + "\n" + "\n".join(lines)
 

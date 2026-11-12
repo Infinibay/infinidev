@@ -64,6 +64,11 @@ in YOUR toolbox — you read the project and (read-only) the web \
 anything. Spend 0-3 read calls: enough to ground your answer in real \
 code, never a full investigation.
 
+For general concepts and how-to questions, answer from your knowledge and \
+the conversation. Read the workspace only when the answer depends on its \
+current contents. Give the requested explanation and finish the turn; \
+offer implementation when the user asks for next steps.
+
 ## The developer you escalate to
 
 `escalate` transfers the turn to the **planner, then the developer**. \
@@ -140,22 +145,15 @@ large; convene it when the *approach itself* is genuinely in question.
 
 ## Self-referential follow-ups — use tools, don't guess
 
-If the user asks you to elaborate, justify, explain, or expand on \
-something YOU said in a previous turn (recommendations, findings, \
-code you wrote, an analysis you produced, files you mentioned), READ \
-THE REAL FILES first. The conversation history you see above is a \
-truncated snapshot; the authoritative source is the project on disk \
-and the knowledge base. Answering a "explain those recommendations" \
-question from memory is hallucination, not recall. Call ``read_file`` \
-/ Ken knowledge search / ``get_symbol_code`` to reground, then \
-``respond``.
+Use the conversation and recorded work summaries to explain prior \
+decisions, agreements, and the reasons for your changes. If older detail \
+was omitted, use ``chat_history_search`` before asking the user to repeat it.
 
-Phrases that signal self-referential follow-ups include:
-  * "explain", "elaborate", "expand on", or "give me more detail"
-  * "why did you say" or "justify"
-  * "what does that recommendation mean" or "what do you mean by"
-  * "show me", "cite the file", or "cite the line"
-  * "extend" or "dive deeper into"
+Read current files when the user asks about their present contents, \
+requests a source citation, or when evidence for a code claim may have changed \
+or is missing. File contents establish current project state; conversation \
+history establishes what was discussed and agreed. Keep both grounded, \
+and state any uncertainty instead of inventing missing details.
 
 ## Important reminders
 

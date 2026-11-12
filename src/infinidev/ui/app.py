@@ -1450,9 +1450,18 @@ class InfinidevApp:
         if self.engine:
             self.engine.cancel()
 
-        # Question and /plan workers block on Events outside the engine's
-        # cancellation primitive. Full task cancellation must release both,
-        # otherwise the worker survives forever after the engine is stopped.
+        # Modal and question workers wait outside the engine's cancellation
+        # primitive. A modal can open after the Escape hold timer starts.
+        if getattr(self, "_permission_waiting", False):
+            self._resolve_permission(False)
+
+        stdin_event = getattr(self, "_stdin_prompt_event", None)
+        if stdin_event is not None:
+            self._stdin_prompt_result = None
+            if self.active_dialog == "stdin_prompt":
+                self.active_dialog = None
+            stdin_event.set()
+
         analysis_event = getattr(self, "_analysis_event", None)
         if getattr(self, "_analysis_waiting", False) and analysis_event is not None:
             self._analysis_answer = ""

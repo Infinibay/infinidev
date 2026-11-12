@@ -891,10 +891,7 @@ def run_task(
     if reviewer is not None and hasattr(reviewer, "_prompt_configuration"):
         reviewer._prompt_configuration = prompt_configuration
 
-    from infinidev.engine.orchestration.chat_agent import (
-        promises_instead_of_working,
-        run_chat_agent,
-    )
+    from infinidev.engine.orchestration.chat_agent import run_chat_agent
     from infinidev.engine.orchestration.request_signals import (
         resolve_referenced_repository,
     )
@@ -1102,6 +1099,7 @@ def run_task(
     else:
         chat_result = run_chat_agent(
             chat_input,
+            literal_user_request=user_input,
             session_id=session_id,
             project_id=agent_project_id,
             workspace_path=agent_workspace,
@@ -1118,28 +1116,6 @@ def run_task(
         runtime.cancel()
         _report_turn_end_to_ken("Cancelled.", session_id)
         return "Cancelled."
-
-    if chat_result.kind == "respond" and promises_instead_of_working(chat_result.reply):
-        # A read-only router cannot do the work it just promised. Returning the
-        # promise ends the turn with nothing done and the user told otherwise:
-        # one corpus run answered "I will draft PLAN.md now, ... and then run
-        # verify.py to confirm it passes" and created no file. The request asked
-        # for work, so escalate it and let the developer do what the promise
-        # described. Not behind a switch: the alternative is the failure.
-        from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
-        from infinidev.engine.orchestration.escalation_packet import EscalationPacket
-
-        logger.warning(
-            "Chat agent promised work instead of escalating; escalating the turn"
-        )
-        hooks.on_status(
-            "info",
-            "The chat reply promised work it cannot perform; handing it to the developer",
-        )
-        chat_result = ChatAgentResult(kind="escalate", escalation=EscalationPacket(
-            user_request=user_input.strip(), understanding="",
-            attachments=list(attachments or []), autonomous=autonomous,
-        ))
 
     if chat_result.kind == "respond":
         if chat_result.error_traceback:
@@ -1223,8 +1199,8 @@ def run_task(
         hooks.notify("Infinidev", escalation.user_visible_preview, "agent")
 
     # ── Spec elaboration (vague request → grounded spec) ────────────────
-    # Direct execution bypasses the chat model entirely. Preserve prior user
-    # decisions for every execution adapter, not just a router's paraphrase.
+    # Preserve prior user decisions for every execution adapter, alongside
+    # the router's paraphrase.
     from infinidev.engine.session_context import render_session_context
 
     turn_context = _join_blocks(

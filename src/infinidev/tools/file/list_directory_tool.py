@@ -128,6 +128,7 @@ class ListDirectoryTool(InfinibayBaseTool):
         entries: list[dict],
         total: int,
         entry_limit_reached: bool,
+        filtering: dict | None = None,
     ) -> str:
         """Serialize a navigable listing without overflowing model context.
 
@@ -146,6 +147,8 @@ class ListDirectoryTool(InfinibayBaseTool):
                 "total": total,
                 "truncated": entry_limit_reached or character_limited,
             }
+            if filtering is not None:
+                data["filtering"] = filtering
             if character_limited:
                 data.update({
                     "returned": len(selected),
@@ -218,6 +221,19 @@ class ListDirectoryTool(InfinibayBaseTool):
             return self._error(f"Not a directory: {file_path}")
 
         use_git = not include_ignored and self._find_git_root(file_path) is not None
+        base_ignored = use_git and bool(self._git_ignored_set(file_path, ["."]))
+        # An explicitly requested ignored base remains browsable, using the
+        # same junk filters as glob instead of inheriting its parent's ignore.
+        use_git = use_git and not base_ignored
+        filtering = {
+            "include_ignored": include_ignored,
+            "ignore_rules": "none" if include_ignored else "git" if use_git else "fallback",
+            "base_ignored": base_ignored,
+        }
+        if not include_ignored:
+            filtering["notice"] = (
+                "Ignored entries may be omitted. Set include_ignored=true to include them."
+            )
 
         entries = []
         count = 0
@@ -316,6 +332,7 @@ class ListDirectoryTool(InfinibayBaseTool):
             entries=entries,
             total=len(entries),
             entry_limit_reached=count >= max_entries,
+            filtering=filtering,
         )
 
     def _run_in_pod(

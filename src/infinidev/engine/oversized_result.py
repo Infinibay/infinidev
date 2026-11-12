@@ -17,12 +17,16 @@ mid-word and stay in the transcript forever, so it reasons from a third of a
 file believing it read the file, and concludes something is absent when it was
 in the 68% that got cut.
 
-So an oversized FILE READ is refused instead, and the refusal carries the
+So an oversized whole FILE READ is refused instead, and the refusal carries the
 file's outline — headings for prose, definitions for code, with line numbers.
 That is the part that matters: a bare refusal makes the model guess at a
 range it has no way to know, and guessing costs the same round-trips the
 truncation did. Choosing from a table of contents costs one. The outline for
 that 432-line handoff is 776 characters, 3% of the file.
+
+Explicit line-range reads keep the first complete lines that fit, with a
+continuation pointing at the first unseen line. The selected content takes
+priority over a structural outline.
 
 Results that cannot be paginated — a diff, a search, a command's output —
 still get trimmed, because there is no range to ask for. They get an honest
@@ -160,6 +164,41 @@ def _refuse_file_read(
     return "\n".join(parts)
 
 
+def _page_file_read(
+    result: str, *, max_chars: int, tool_name: str, path: str,
+) -> str:
+    """Keep a prefix of the selected lines and name the first unread line."""
+    numbered = _strip_line_numbers(result)
+    first, final = numbered[0][0], numbered[-1][0]
+    offset_arg = _PAGINATED[tool_name]
+    lines: list[str] = []
+    size = 0
+    notice = ""
+    for number, content in numbered:
+        line = f"{number:>6}\t{content}"
+        candidate_notice = (
+            "\n\n[All requested lines are shown. Additional tool annotations were omitted.]"
+            if number == final else
+            f"\n\n[PARTIAL READ: showing lines {first}-{number} of requested "
+            f"result {first}-{final}. Remaining lines are NOT shown. Continue with "
+            f"{tool_name}(file_path={path!r}, {offset_arg}={number + 1}, "
+            f"limit={final - number}).]"
+        )
+        candidate_size = size + bool(lines) + len(line)
+        if candidate_size + len(candidate_notice) > max_chars:
+            break
+        lines.append(line)
+        size = candidate_size
+        notice = candidate_notice
+    if lines:
+        return "\n".join(lines) + notice
+    return (
+        f"No complete line fits within the {max_chars}-character result limit. "
+        f"The requested result starts at line {first}; no content was shown. "
+        "Use a targeted search or symbol read to inspect this long line."
+    )[:max_chars]
+
+
 def _trim_unpaginated(result: str, *, max_chars: int) -> str:
     """Cut a result there is no way to request a range of."""
     hidden = len(result) - max_chars
@@ -181,14 +220,21 @@ def handle_oversized_result(
 ) -> str:
     """Return what the model should receive for *result*.
 
-    Under the limit, *result* itself. Over it, a refusal with an outline for a
-    file read, or a trimmed result with an honest notice for anything else.
+    Under the limit, *result* itself. Over it, a bounded page for an explicit
+    file range, an outline for a whole-file read, or an honest trim otherwise.
     """
     if len(result) <= max_chars:
         return result
 
     path = _path_from(tool_args)
     if tool_name in _PAGINATED and path and _NUMBERED_LINE.search(result):
+        args = _args_dict(tool_args)
+        if any(args.get(key) is not None for key in (
+            "offset", "limit", "start_line", "end_line", "line_range",
+        )):
+            return _page_file_read(
+                result, max_chars=max_chars, tool_name=tool_name, path=path,
+            )
         return _refuse_file_read(
             result, max_chars=max_chars, tool_name=tool_name, path=path,
         )

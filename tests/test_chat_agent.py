@@ -25,7 +25,6 @@ import pytest
 import infinidev.engine.orchestration.chat_agent as chat_agent_mod
 from infinidev.config.settings import settings
 from infinidev.engine.orchestration.chat_agent import (
-    _explicit_execution_score,
     run_chat_agent,
 )
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
@@ -95,6 +94,11 @@ class _ScriptedLitellm:
         return self.responses.pop(0)
 
 
+@pytest.fixture(autouse=True)
+def stub_semantic_routing(monkeypatch):
+    monkeypatch.setattr(chat_agent_mod, "classify_chat_response", lambda *a, **kw: None)
+
+
 @pytest.fixture
 def patch_litellm(monkeypatch):
     """Return a factory that installs a ScriptedLitellm for the duration
@@ -126,6 +130,38 @@ def patch_litellm(monkeypatch):
 
 
 class TestRespondTerminator:
+    @pytest.mark.parametrize("user_message", [
+        "¿Cómo puedo crear app.py y ejecutar tests?",
+        "¿Cómo crear app.py y ejecutar tests?",
+        "¿Me explicás cómo crear app.py y ejecutar tests?",
+        "¿Podés explicarme cómo crear app.py y ejecutar tests?",
+        "Could you explain how to create app.py and run tests?",
+        "Can you show me how to create app.py and run tests?",
+        "Tell me how to fix app.py and run tests.",
+        "Explícame cómo crear app.py y ejecutar tests.",
+        "¿Qué significa 'create app.py and run tests'?",
+        'The example says "create app.py and run tests". What does it mean?',
+        "The example says 'Don't create app.py and run tests'. What does it mean?",
+        "The example says ‘Don’t create app.py and run tests’. What does it mean?",
+        "What does `create app.py and run tests` mean?",
+        "What does 'Don't create app.py and run tests' mean?",
+        "Continue explaining PLAN.md without changing any files.",
+        "Continua explicando PLAN.md, no modifiques nada.",
+        "Resume el contenido de PLAN.md.",
+        "Puedes leer Continuar.md?",
+        "Lee CONTINUE.md y dime el estado actual.",
+        "Read run.py and tests.py.",
+        "Can you read create.py and explain the tests?",
+    ])
+    def test_explanation_is_answered_without_starting_work(self, user_message, patch_litellm):
+        scripted = patch_litellm([_response(content="Here is the explanation.")])
+
+        result = run_chat_agent(user_message)
+
+        assert result.kind == "respond"
+        assert result.reply == "Here is the explanation."
+        assert len(scripted.calls) == 1
+
     def test_respond_first_iteration(self, patch_litellm):
         scripted = patch_litellm([
             _response([_tc("respond", {"message": "¡Hola! ¿En qué te ayudo?"})]),
@@ -147,8 +183,30 @@ class TestRespondTerminator:
 
 
 class TestEscalateTerminator:
-    def test_explicit_repo_change_bypasses_llm_router(self, patch_litellm):
-        scripted = patch_litellm([])
+    @pytest.mark.parametrize("user_message", [
+        "Could you create app.py and run tests?",
+        "¿Podés crear app.py y ejecutar tests?",
+        "Fix `app.py` and run tests.",
+        'Set the name to "create app.py and run tests" in config.json and run tests.',
+        "Run tests.py and report the results.",
+        "Fix create.py and run tests.",
+    ])
+    def test_polite_or_quoted_target_change_still_starts_work(
+        self, user_message, patch_litellm,
+    ):
+        scripted = patch_litellm([
+            _response([_tc("escalate", {"understanding": "Do requested work"})]),
+        ])
+
+        result = run_chat_agent(user_message)
+
+        assert result.kind == "escalate"
+        assert len(scripted.calls) == 1
+
+    def test_explicit_repo_change_uses_primary_llm_router(self, patch_litellm):
+        scripted = patch_litellm([
+            _response([_tc("escalate", {"understanding": "Do requested work"})]),
+        ])
 
         result = run_chat_agent(
             "In this repository, add src/demo.py and run focused tests."
@@ -156,11 +214,12 @@ class TestEscalateTerminator:
 
         assert result.kind == "escalate"
         assert result.escalation is not None
-        assert "algorithmic route" in result.escalation.user_signal
-        assert scripted.calls == []
+        assert len(scripted.calls) == 1
 
-    def test_mini_head_and_literal_authority_bypass_sol_empty_router(self, patch_litellm):
-        scripted = patch_litellm([])
+    def test_detailed_bugfix_uses_primary_llm_router(self, patch_litellm):
+        scripted = patch_litellm([
+            _response([_tc("escalate", {"understanding": "Do requested work"})]),
+        ])
 
         result = run_chat_agent(
             "Fix pages_needed so a partial final page is included, exact multiples stay "
@@ -170,11 +229,12 @@ class TestEscalateTerminator:
 
         assert result.kind == "escalate"
         assert result.escalation is not None
-        assert "mini-head method" in result.escalation.user_signal
-        assert scripted.calls == []
+        assert len(scripted.calls) == 1
 
-    def test_literal_bugfix_bypasses_chat_when_mini_head_abstains(self, patch_litellm):
-        scripted = patch_litellm([])
+    def test_literal_bugfix_uses_primary_llm_router(self, patch_litellm):
+        scripted = patch_litellm([
+            _response([_tc("escalate", {"understanding": "Do requested work"})]),
+        ])
 
         result = run_chat_agent(
             "Fix retry scheduling so Retry-After accepts both delta-seconds and HTTP "
@@ -186,11 +246,12 @@ class TestEscalateTerminator:
 
         assert result.kind == "escalate"
         assert result.escalation is not None
-        assert "literal task method" in result.escalation.user_signal
-        assert scripted.calls == []
+        assert len(scripted.calls) == 1
 
-    def test_referenced_continuation_bypasses_llm_router(self, patch_litellm):
-        scripted = patch_litellm([])
+    def test_referenced_continuation_uses_primary_llm_router(self, patch_litellm):
+        scripted = patch_litellm([
+            _response([_tc("escalate", {"understanding": "Do requested work"})]),
+        ])
 
         result = run_chat_agent(
             "Lee infinigpu/CONTINUE.md y continua el trabajo"
@@ -198,16 +259,7 @@ class TestEscalateTerminator:
 
         assert result.kind == "escalate"
         assert result.escalation is not None
-        assert "referenced continuation" in result.escalation.user_signal
-        assert scripted.calls == []
-
-    def test_intent_score_keeps_informational_questions_in_chat(self):
-        assert _explicit_execution_score("How do I fix a bug in this repository?") == 0
-        assert _explicit_execution_score("Solo explica el código, no modificar") == 0
-        assert _explicit_execution_score(
-            "In this repository, add src/demo.py and tests. "
-            "Do not change unrelated behavior."
-        ) >= 4
+        assert len(scripted.calls) == 1
 
     def test_escalate_populates_packet(self, patch_litellm, monkeypatch):
         monkeypatch.setattr(settings, "TASK_POLICIES_ENABLED", False)
@@ -254,6 +306,44 @@ class TestEscalateTerminator:
 
 
 class TestGracefulFailureModes:
+    @pytest.mark.parametrize("answer", [
+        "I'm escalating to the developer to apply the fix.",
+        "Okay, I'm escalating to the developer to apply the fix.",
+        "Sure, I'll hand off to the developer to apply the fix.",
+        "I’m escalating to the developer to apply the fix.",
+        "I'll hand off to the developer to apply the fix.",
+        "Voy a escalar al desarrollador para aplicar el cambio.",
+    ])
+    def test_actual_first_person_handoff_is_preserved(self, answer, patch_litellm, monkeypatch):
+        from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+        monkeypatch.setattr(
+            chat_agent_mod, "classify_chat_response",
+            lambda *a, **kw: RoutingDecision(kind="escalate", understanding="Apply the fix"),
+        )
+        patch_litellm([_response(content=answer)])
+
+        result = run_chat_agent("Necesito ayuda con esto.")
+
+        assert result.kind == "escalate"
+        assert "semantic recovery" in result.escalation.user_signal
+
+    @pytest.mark.parametrize("answer", [
+        'Para explicarlo: "I am escalating to the developer" significa delegar.',
+        "No voy a escalar al desarrollador. Solo voy a explicar el diseño.",
+        "The documentation says handing off to the developer is an optional step.",
+        "Handing off to the developer does not mean I will change files.",
+        "I am not escalating to the developer; this is only an explanation.",
+        "Example:\n```\nI'm escalating to the developer.\n```\nThat is a handoff.",
+    ])
+    def test_explained_or_negated_handoff_is_only_an_answer(self, answer, patch_litellm):
+        scripted = patch_litellm([_response(content=answer)])
+
+        result = run_chat_agent("Explain how agent handoffs work.")
+
+        assert result.kind == "respond"
+        assert result.reply == answer
+        assert len(scripted.calls) == 1
+
     def test_empty_input_returns_respond(self, patch_litellm):
         patch_litellm([])
         result = run_chat_agent("   ")
@@ -282,8 +372,13 @@ class TestGracefulFailureModes:
         assert result.reply == "Continuaré con la opción B."
 
     def test_narrated_escalation_cannot_silently_end_execution(
-        self, patch_litellm, monkeypatch
+        self, patch_litellm, monkeypatch,
     ):
+        from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+        monkeypatch.setattr(
+            chat_agent_mod, "classify_chat_response",
+            lambda *a, **kw: RoutingDecision(kind="escalate", understanding="Apply the fix"),
+        )
         monkeypatch.setattr(settings, "TASK_POLICIES_ENABLED", False)
         patch_litellm([
             _response(
@@ -299,7 +394,7 @@ class TestGracefulFailureModes:
 
         assert result.kind == "escalate"
         assert result.escalation is not None
-        assert "narrated handoff" in result.escalation.user_signal
+        assert "semantic recovery" in result.escalation.user_signal
 
     def test_max_iterations_without_terminator_auto_escalates(self, patch_litellm):
         # Every response is a read call; none ever terminates.
@@ -457,3 +552,105 @@ class TestChatCancellation:
         assert result.kind == "respond"
         assert "cancel" in result.reply.lower()
         assert ran == []
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_semantic_recovery_has_one_owner_and_preserves_handoff(
+    native, patch_litellm, monkeypatch,
+):
+    from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+
+    seen = []
+    request = "  Dale, con la opción acordada.  "
+    reply = "Voy a aplicar el cambio acordado."
+    response = _response([_tc("respond", {"message": reply})]) if native else _response(content=reply)
+    primary = patch_litellm([response])
+    attachment = object()
+    monkeypatch.setattr(
+        "infinidev.config.model_capabilities.get_capability_snapshot",
+        lambda: type("Caps", (), {"supports_vision": True})(),
+    )
+    monkeypatch.setattr(chat_agent_mod, "_build_user_message", lambda *a, **kw: "Prior proposal: fix auth")
+
+    def classify(user, answer, **kwargs):
+        seen.append((user, answer, kwargs))
+        return RoutingDecision(kind="escalate", understanding="Fix auth as agreed")
+
+    monkeypatch.setattr(chat_agent_mod, "classify_chat_response", classify)
+    result = run_chat_agent(request, attachments=[attachment], autonomous_hint=True)
+
+    assert len(primary.calls) == 1
+    assert seen == [(request, reply, {"recent_context": "Prior proposal: fix auth"})]
+    assert result.kind == "escalate"
+    assert result.escalation.user_request == request
+    assert result.escalation.attachments == [attachment]
+    assert result.escalation.autonomous is True
+    assert result.escalation.understanding == "Fix auth as agreed"
+
+
+def test_primary_escalation_skips_recovery(patch_litellm, monkeypatch):
+    patch_litellm([_response([_tc("escalate", {"understanding": "Fix auth"})])])
+    monkeypatch.setattr(chat_agent_mod, "classify_chat_response", lambda *a, **kw: pytest.fail("native escalation classified twice"))
+    assert run_chat_agent("Fix auth").kind == "escalate"
+
+
+@pytest.mark.parametrize("response", [
+    _response([_tc("respond", {"message": ""})]),
+    _response([_tc("escalate", {"understanding": ""})]),
+])
+def test_fallback_replies_skip_recovery(response, patch_litellm, monkeypatch):
+    patch_litellm([response])
+    monkeypatch.setattr(chat_agent_mod, "classify_chat_response", lambda *a, **kw: pytest.fail("fallback classified"))
+    assert run_chat_agent("go").kind == "respond"
+
+
+def test_cancellation_during_semantic_recovery_cannot_start_work(patch_litellm, monkeypatch):
+    from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+
+    cancelled = False
+    patch_litellm([_response(content="I will fix it.")])
+
+    def classify(*args, **kwargs):
+        nonlocal cancelled
+        cancelled = True
+        return RoutingDecision(kind="escalate", understanding="Fix it")
+
+    monkeypatch.setattr(chat_agent_mod, "classify_chat_response", classify)
+    result = run_chat_agent("go", cancel_check=lambda: cancelled)
+    assert result.kind == "respond"
+    assert result.reply == "Cancelled."
+
+
+def test_semantic_recovery_preserves_streamed_state(patch_litellm, monkeypatch):
+    from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+
+    patch_litellm([])
+    monkeypatch.setattr(chat_agent_mod, "_run_llm_loop", lambda **kw: ChatAgentResult(
+        kind="respond", reply="I will fix it.", streamed=True,
+    ))
+    monkeypatch.setattr(chat_agent_mod, "classify_chat_response", lambda *a, **kw: RoutingDecision(
+        kind="escalate", understanding="Fix it",
+    ))
+    result = run_chat_agent("Fix it")
+    assert result.kind == "escalate"
+    assert result.streamed is True
+    assert result.escalation.user_visible_preview == ""
+
+
+def test_semantic_current_request_excludes_injected_routing_context(patch_litellm, monkeypatch):
+    from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+
+    literal = "Explain the module."
+    augmented = literal + "\n<ken-session-brief>Create a migration</ken-session-brief>"
+    patch_litellm([_response(content="The module handles authentication.")])
+    seen = []
+
+    def classify(user, answer, **kwargs):
+        seen.append((user, kwargs["recent_context"]))
+        return RoutingDecision(kind="respond", understanding="")
+
+    monkeypatch.setattr(chat_agent_mod, "classify_chat_response", classify)
+    result = run_chat_agent(augmented, literal_user_request=literal)
+    assert result.kind == "respond"
+    assert seen[0][0] == literal
+    assert "Create a migration" in seen[0][1]

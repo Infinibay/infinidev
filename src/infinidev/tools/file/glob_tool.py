@@ -126,15 +126,20 @@ class GlobTool(InfinibayBaseTool):
             except re.error as e:
                 return self._error(f"Invalid content_pattern regex: {e}")
 
-        use_git = (
-            not include_ignored
-            and self._find_git_root(file_path) is not None
-            # An explicitly requested base may itself live below an ignored
-            # parent (temporary worktrees are a common example). In that case
-            # Git would report every child as ignored, so use the bounded
-            # filesystem fallback and apply its normal junk-directory filter.
-            and not self._git_is_ignored(".", file_path)
-        )
+        use_git = not include_ignored and self._find_git_root(file_path) is not None
+        base_ignored = use_git and self._git_is_ignored(".", file_path)
+        # Git ignores every child of an ignored base. An explicit request
+        # instead explores that base with the normal fallback junk filters.
+        use_git = use_git and not base_ignored
+        filtering = {
+            "include_ignored": include_ignored,
+            "ignore_rules": "none" if include_ignored else "git" if use_git else "fallback",
+            "base_ignored": base_ignored,
+        }
+        if not include_ignored:
+            filtering["notice"] = (
+                "Ignored entries may be omitted. Set include_ignored=true to include them."
+            )
 
         # Batch git check-ignore for performance: collect all glob results
         # first, then filter in one pass.
@@ -241,6 +246,7 @@ class GlobTool(InfinibayBaseTool):
             "match_count": len(matches),
             "truncated": truncated,
             "matches": matches,
+            "filtering": filtering,
         })
 
     def _run_in_pod(

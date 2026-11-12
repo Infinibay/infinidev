@@ -8,6 +8,8 @@ tokens before a single tool schema.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from infinidev.engine.token_usage import report_prompt_tokens
@@ -51,6 +53,65 @@ class TestReadingUsage:
         n = report_prompt_tokens(hooks, _Response(None), messages=messages, model="gpt-4")
         assert n > 1_000
         assert hooks.calls[0][0] == n
+
+    def test_streamed_prompt_count_includes_tool_schemas(self, monkeypatch):
+        import litellm
+
+        messages = [{"role": "user", "content": "hello"}]
+        tools = [{"type": "function", "function": {"name": "read_file"}}]
+
+        def count_tokens(*, model, messages, tools):
+            return 800 + len(json.dumps(tools))
+
+        monkeypatch.setattr(litellm, "token_counter", count_tokens)
+        hooks = _Recorder()
+        count = report_prompt_tokens(hooks, messages=messages, tools=tools, model="gpt-4")
+        assert count == 800 + len(json.dumps(tools))
+        assert hooks.calls == [(count, "chat")]
+
+    def test_usage_takes_priority_over_tool_estimation(self, monkeypatch):
+        import litellm
+
+        def fail_counter(**kwargs):
+            pytest.fail("provider usage must bypass prompt estimation")
+
+        monkeypatch.setattr(litellm, "token_counter", fail_counter)
+        assert report_prompt_tokens(
+            _Recorder(), _Response(13_605), tools=[{"description": "x" * 34_282}]
+        ) == 13_605
+
+    def test_tokenizer_failure_counts_serialized_messages_and_schemas(self, monkeypatch):
+        import litellm
+
+        def fail_counter(**kwargs):
+            raise ValueError("unknown model")
+
+        monkeypatch.setattr(litellm, "token_counter", fail_counter)
+        messages = [{"role": "user", "content": "x" * 20_965}]
+        tools = [{"type": "function", "function": {"description": "x" * 34_282}}]
+        count = report_prompt_tokens(None, messages=messages, tools=tools, model="unknown")
+        assert count >= (20_965 + 34_282) // 4
+        assert count > report_prompt_tokens(None, messages=messages, model="unknown")
+
+    def test_tools_alone_are_measurable(self, monkeypatch):
+        import litellm
+
+        def count_tokens(**kwargs):
+            return 456 if kwargs.get("tools") else 0
+
+        monkeypatch.setattr(litellm, "token_counter", count_tokens)
+        assert report_prompt_tokens(None, tools=[{"description": "schema"}]) == 456
+
+    def test_unserializable_fallback_never_breaks_the_turn(self, monkeypatch):
+        import litellm
+
+        def fail_counter(**kwargs):
+            raise ValueError("unknown model")
+
+        monkeypatch.setattr(litellm, "token_counter", fail_counter)
+        recursive_schema = {}
+        recursive_schema["self"] = recursive_schema
+        assert report_prompt_tokens(None, tools=[recursive_schema]) == 0
 
     def test_nothing_measurable_reports_nothing(self):
         hooks = _Recorder()

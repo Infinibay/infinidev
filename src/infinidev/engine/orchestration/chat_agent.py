@@ -29,7 +29,7 @@ import types
 import uuid
 from typing import Any, Callable, Optional
 
-from infinidev.config.llm import get_litellm_params_for_behavior
+from infinidev.config.llm import get_litellm_params_for_behavior, provider_for_request
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.loop.llm_caller import (
     ThinkStreamFilter,
@@ -37,6 +37,7 @@ from infinidev.engine.loop.llm_caller import (
     normalize_message_text,
     strip_think_blocks,
 )
+from infinidev.engine.llm_client import _STREAM_USAGE_PROVIDERS
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import (
     build_tool_dispatch,
@@ -53,10 +54,7 @@ from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.engine.orchestration.autonomous import (
     apply_autonomous_to_packet as _apply_autonomous_to_packet,
 )
-from infinidev.engine.orchestration.request_signals import (
-    explicit_execution_score as _explicit_execution_score,
-    is_referenced_continuation_request,
-)
+from infinidev.engine.orchestration.semantic_routing import classify_chat_response
 from infinidev.prompts.chat_agent import build_chat_agent_system_prompt
 from infinidev.prompts.profiles import EffectivePromptConfiguration
 from infinidev.tools import get_tools_for_role
@@ -67,68 +65,6 @@ from infinidev.tools.base.context import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-#: A reply that opens with a first-person commitment to do engineering work.
-#: The chat agent is read-only: it cannot do the work, so promising it is a
-#: category error, and the turn ends with the promise as the deliverable.
-_INTENTION = re.compile(
-    r"^\W*(?:(?:sure|okay|ok|alright|got it|of course)[\s,.!:-]*)?"
-    r"(?:i(?:'ll| will| am going to|'m going to| shall)\b"
-    r"|let me\b|now i(?:'ll| will)\b|next,? i(?:'ll| will)\b)",
-    re.IGNORECASE,
-)
-
-#: The work the promise is about. Kept to engineering verbs so that a genuine
-#: conversational reply ("I will explain the trade-off") is left alone.
-_WORK_VERB = re.compile(
-    r"\b(?:implement|create|draft|write|fix|add|build|update|refactor|generate"
-    r"|edit|move|delete|install|test|verify|apply|patch|run|make)\b",
-    re.IGNORECASE,
-)
-
-#: An opening that offers to *talk* about the work is a conversational answer,
-#: not a promise to do it. "I'll walk you through how to build it" names a work
-#: verb and is exactly the reply the chat agent exists to give, so a
-#: communication verb anywhere in the first sentence vetoes the guard. The cost
-#: is a missed promise that also offered to explain; the prompt's own rule is
-#: that a false escalation is worse than an extra turn.
-_COMMUNICATION_VERB = re.compile(
-    r"\b(?:explain|walk|describe|outline|summari[sz]e|clarify|detail|cover|tell"
-    r"|show|answer|discuss|review|compare|list)\b",
-    re.IGNORECASE,
-)
-
-#: A promise is short. A real answer that happens to contain an intent sentence
-#: is not, so the length bound keeps the guard away from prose.
-_PROMISE_MAX_CHARS = 700
-
-_FIRST_SENTENCE = re.compile(r"[^.\n!?]*")
-
-
-def promises_instead_of_working(reply: str) -> bool:
-    """Whether a chat reply commits to work instead of answering.
-
-    One run in the corpus ended with ``"I will draft PLAN.md now, scoped to the
-    tenant export change in requirements.md, and then run verify.py to confirm
-    it passes."`` as the turn's answer: the loop never ran, no file was created,
-    and the user read a promise. The chat agent cannot act, so the promise could
-    only ever be false — the repair is to escalate the turn to the developer,
-    which is what the request asked for in the first place.
-
-    Conservative by construction: the commitment has to open the reply and the
-    first sentence has to name engineering work, so "I will explain why the
-    cache is stale" and long answers are untouched.
-    """
-    text = str(reply or "").strip()
-    if not text or len(text) > _PROMISE_MAX_CHARS:
-        return False
-    match = _FIRST_SENTENCE.match(text)
-    opening = match.group(0) if match else text
-    if _COMMUNICATION_VERB.search(opening):
-        return False
-    return bool(_INTENTION.match(opening) and _WORK_VERB.search(opening))
-
 
 
 # The chat prompt allows 0-3 grounding reads before a mandatory routing
@@ -146,77 +82,11 @@ def _cancelled_result() -> ChatAgentResult:
     return ChatAgentResult(kind="respond", reply="Cancelled.")
 
 
-def _direct_execution_route(
-    user_input: str, attachments: list[Any] | None,
-    *, autonomous_hint: bool = False,
-) -> ChatAgentResult | None:
-    """Bypass conversational routing only for high-confidence work intent."""
-    direct_signal = "explicit execution request"
-    execution_score = _explicit_execution_score(user_input)
-    should_route = execution_score >= 4
-    if not should_route and execution_score >= 3:
-        try:
-            from infinidev.config.settings import settings
-            from infinidev.engine.task_policies import resolve_task_profile
-
-            if settings.TASK_POLICIES_ENABLED and settings.TASK_POLICIES_EMBEDDINGS_ENABLED:
-                profile = resolve_task_profile(
-                    user_input,
-                    enable_embeddings=True,
-                    enable_llm_fallback=False,
-                    max_policies=1,
-                    encoder_checkpoint=settings.TASK_POLICIES_ENCODER_PATH or None,
-                    encoder_device=settings.TASK_POLICIES_ENCODER_DEVICE,
-                )
-                modifying_methods = {
-                    "bugfix.root_cause",
-                    "feature.contract_first",
-                    "refactor.preserve_behavior",
-                    "performance.measure_first",
-                }
-                modifying_operations = {
-                    "bugfix", "feature", "refactor", "performance",
-                }
-                method_agreement = bool(
-                    modifying_operations.intersection(profile.operations)
-                )
-                if method_agreement and "modify" in profile.authority:
-                    should_route = True
-                    used_mini_head = any(
-                        selection.source == "embedding"
-                        and selection.id in modifying_methods
-                        for selection in profile.selected_policies
-                    )
-                    direct_signal = (
-                        "mini-head method with literal modify authority"
-                        if used_mini_head
-                        else "literal task method with literal modify authority"
-                    )
-        except Exception:
-            logger.debug("Mini-head direct routing failed closed", exc_info=True)
-    if is_referenced_continuation_request(user_input):
-        should_route = True
-        direct_signal = "referenced continuation"
-    if not should_route:
-        return None
-    request = user_input.strip()
-    packet = EscalationPacket(
-        user_request=request,
-        understanding=request,
-        user_signal=f"(algorithmic route: {direct_signal})",
-        suggested_flow="develop",
-        attachments=list(attachments or []),
-    )
-    packet = _apply_autonomous_to_packet(
-        packet, user_input, explicit_hint=autonomous_hint,
-    )
-    return ChatAgentResult(kind="escalate", escalation=packet)
-
-
 def run_chat_agent(
     user_input: str,
     *,
     session_id: Optional[str] = None,
+    literal_user_request: str | None = None,
     project_id: Optional[int] = None,
     workspace_path: Optional[str] = None,
     max_iterations: int | None = None,
@@ -243,6 +113,7 @@ def run_chat_agent(
     max-iter exhaustion), a fallback ``respond`` is returned rather
     than raising — the UI must always get something to show the user.
     """
+    current_request = user_input if literal_user_request is None else literal_user_request
     prompt_configuration = (
         prompt_configuration or EffectivePromptConfiguration.compile()
     )
@@ -283,14 +154,6 @@ def run_chat_agent(
                 "No request was sent; your text and attachments were left unchanged."
             ),
         )
-    direct_route = _direct_execution_route(user_input, attachments, autonomous_hint=autonomous_hint)
-    if direct_route is not None:
-        return direct_route
-    # Local closure that stamps the autonomous flag onto every
-    # EscalationPacket this turn can produce (direct, narrated, escalate
-    # tool, max-iter fallback). The hint comes from the pipeline's
-    # `autonomous=True` kwarg or from a manual session toggle — text
-    # matching happens via the default detection in the helper.
     def _apply(packet: EscalationPacket) -> EscalationPacket:
         return _apply_autonomous_to_packet(packet, user_input, explicit_hint=autonomous_hint)
     tools = get_tools_for_role("chat_agent", supports_vision=_supports_vision)
@@ -345,6 +208,34 @@ def run_chat_agent(
             apply_autonomous=_apply,
             cancel_check=cancel_check,
         )
+        if cancel_check is not None and cancel_check():
+            return _cancelled_result()
+        if (
+            result.kind == "respond"
+            and not result.error_traceback
+            and result.reply not in _FALLBACK_MESSAGES.values()
+            and result.reply != "Cancelled."
+        ):
+            # Reuse the already-built conversation input as bounded data. The
+            # semantic check owns recovery for both native and plain replies.
+            context = normalize_message_text(messages[1].get("content"))
+            decision = classify_chat_response(
+                current_request, result.reply, recent_context=context,
+            )
+            if cancel_check is not None and cancel_check():
+                return _cancelled_result()
+            if decision is not None and decision.kind == "escalate":
+                result = ChatAgentResult(
+                    kind="escalate",
+                    escalation=_apply(EscalationPacket(
+                        user_request=current_request,
+                        understanding=decision.understanding,
+                        user_visible_preview="" if result.streamed else result.reply,
+                        user_signal="(semantic recovery)",
+                        suggested_flow="develop",
+                    )),
+                    streamed=result.streamed,
+                )
         # Carry the attachments through the escalation packet so the
         # planner and developer can also see the images the user
         # attached in chat.
@@ -480,6 +371,14 @@ def _run_llm_loop(
         call_kwargs.setdefault("temperature", 0.1)
         call_kwargs["stream"] = stream_mode
         call_kwargs.setdefault("max_tokens", 2000)
+        if stream_mode:
+            from infinidev.config.settings import settings
+
+            provider = provider_for_request(call_kwargs, settings.LLM_PROVIDER)
+            if provider in _STREAM_USAGE_PROVIDERS:
+                call_kwargs["stream_options"] = {
+                    **(call_kwargs.get("stream_options") or {}), "include_usage": True,
+                }
 
         response = litellm.completion(**call_kwargs)
         if cancel_check is not None and cancel_check():
@@ -491,6 +390,7 @@ def _run_llm_loop(
         report_prompt_tokens(
             hooks, response, lane="chat",
             messages=messages, model=call_kwargs.get("model", ""),
+            tools=tool_schemas,
         )
 
         if stream_mode:
@@ -511,26 +411,6 @@ def _run_llm_loop(
             streamed = False
 
         if not tool_calls:
-            # The model chatted in plain text instead of calling a tool.
-            # Most plain text is a conversational response. Some models,
-            # notably MiniMax M3, instead narrate the required terminal call
-            # ("I'm escalating to the developer") without emitting it. Do not
-            # turn that explicit handoff into a final answer that silently
-            # skips the selected execution engine.
-            if _plain_text_declares_escalation(content):
-                packet = EscalationPacket(
-                    user_request=user_input.strip(),
-                    understanding=content.strip(),
-                    user_visible_preview="" if streamed else content.strip(),
-                    user_signal="(auto-escalate: narrated handoff)",
-                    suggested_flow="develop",
-                )
-                packet = apply_autonomous(packet) if apply_autonomous is not None else _apply_autonomous_to_packet(packet, user_input)
-                return ChatAgentResult(
-                    kind="escalate",
-                    escalation=packet,
-                    streamed=streamed,
-                )
             return ChatAgentResult(
                 kind="respond",
                 reply=content.strip() or "(no reply)",
@@ -611,23 +491,6 @@ def _run_llm_loop(
 # ─────────────────────────────────────────────────────────────────────────
 # Terminator parsing
 # ─────────────────────────────────────────────────────────────────────────
-
-
-_NARRATED_ESCALATION_RE = re.compile(
-    r"\b(?:"
-    r"i(?:'m| am|'ll| will)\s+escalat(?:e|ing)"
-    r"|escalating\s+(?:this\s+)?to\s+(?:the\s+)?(?:developer|planner)"
-    r"|hand(?:ing|off)\b[^.\n]{0,80}\b(?:developer|planner)"
-    r"|voy\s+a\s+escalar"
-    r"|escalando\b[^.\n]{0,80}\b(?:desarrollador|planner)"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
-def _plain_text_declares_escalation(content: str) -> bool:
-    """Whether prose explicitly claims the tool handoff it failed to emit."""
-    return bool(_NARRATED_ESCALATION_RE.search(content or ""))
 
 
 def _build_respond(
@@ -1265,6 +1128,8 @@ def _consume_stream(
                 with best_effort("close cancelled chat stream failed"):
                     close()
             raise _ChatCancelled()
+        if getattr(chunk, "usage", None) is not None:
+            report_prompt_tokens(hooks, chunk, lane="chat")
         try:
             delta = chunk.choices[0].delta
         except (AttributeError, IndexError):

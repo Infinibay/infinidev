@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, EnvSettingsSource
 
 logger = logging.getLogger(__name__)
 
@@ -793,8 +793,9 @@ class Settings(BaseSettings):
                     e,
                 )
 
-        # Env vars take precedence over file settings
-        return cls(**file_settings)
+        # Constructor arguments normally outrank env vars. Merge the decoded
+        # environment here so persisted settings remain lower priority.
+        return cls(**{**file_settings, **EnvSettingsSource(cls)()})
 
     def save_user_settings(self, updates: dict):
         """Save specific updates to the settings file."""
