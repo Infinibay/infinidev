@@ -404,11 +404,10 @@ class Settings(BaseSettings):
     # Steps are bounded by context pressure and progress evidence, not call count.
     # Zero keeps their tool surface open until completion, cancellation, or compaction.
     TASK_MAX_TOOL_CALLS_PER_STEP: int = 0
-    # The chat agent is a router, not a second developer loop. Its prompt
-    # allows 0-3 grounding reads before a required respond/escalate decision;
-    # keep a short hard ceiling so it cannot delay every engine behind a long
-    # read-only investigation.
+    # Initial chat window; the agent can extend a progressing read-only
+    # investigation up to the total ceiling without starting a developer.
     CHAT_AGENT_MAX_ITERATIONS: int = 5
+    CHAT_AGENT_INVESTIGATION_MAX_ITERATIONS: int = Field(default=20, ge=1)
     # Graph beta operational limits (§5.4), applied by the live scheduler
     # and its bounded LoopEngine leaf executions.
     GRAPH_MAX_OPEN_BRANCHES: int = 8

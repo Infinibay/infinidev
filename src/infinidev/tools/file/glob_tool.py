@@ -1,9 +1,13 @@
 """Tool for finding files by name pattern with optional content filtering."""
 
+from __future__ import annotations
+
 import json
 import os
 import re
 import subprocess
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Type
 
@@ -90,6 +94,81 @@ class GlobTool(InfinibayBaseTool):
             return self._git_is_ignored(full_rel, base_str)
         return False
 
+    def _glob_paths(
+        self, base: Path, pattern: str, include_ignored: bool,
+        use_git: bool, max_depth: int | None,
+    ) -> Iterator[Path]:
+        """Expand glob components, excluding directories before descending into them."""
+        parts = Path(pattern).parts
+        if Path(pattern).is_absolute():
+            raise NotImplementedError("Non-relative patterns are unsupported")
+        if not parts or pattern.endswith(os.sep):
+            return
+        # Before Python 3.13 a terminal ** matches only directories, and
+        # this tool returns only files.
+        if parts[-1] == "**" and sys.version_info < (3, 13):
+            return
+
+        def allowed(paths: list[Path]) -> list[Path]:
+            if include_ignored:
+                return paths
+            if not use_git:
+                return [
+                    path for path in paths
+                    if not (path.is_dir() and self._should_skip_fallback(path.name))
+                ]
+            paths = [path for path in paths if path.name != ".git" or not path.is_dir()]
+            if not paths:
+                return paths
+            ignored: set[str] = set()
+            try:
+                result = subprocess.run(
+                    ["git", "check-ignore", "--stdin", "-z"],
+                    input="\0".join(str(path.relative_to(base)) for path in paths),
+                    capture_output=True, text=True, cwd=str(base), timeout=10,
+                )
+                if result.returncode <= 1:
+                    ignored = {name for name in result.stdout.split("\0") if name}
+            except (OSError, subprocess.SubprocessError):
+                pass
+            return [path for path in paths if str(path.relative_to(base)) not in ignored]
+
+        visited: set[tuple[Path, int]] = set()
+        emitted: set[Path] = set()
+
+        def select(directory: Path, index: int) -> Iterator[Path]:
+            state = (directory, index)
+            if state in visited:
+                return
+            visited.add(state)
+            if max_depth is not None and len(directory.relative_to(base).parts) >= max_depth:
+                return
+            recursive = parts[index] == "**"
+            if recursive and index + 1 < len(parts):
+                yield from select(directory, index + 1)
+            candidates = list(directory.glob("*" if recursive else parts[index]))
+            if recursive and index + 1 < len(parts):
+                candidates = [path for path in candidates if path.is_dir()]
+            candidates = allowed(candidates)
+            for path in candidates:
+                is_directory = path.is_dir()
+                if recursive:
+                    # Like Path.glob, ** does not follow directory symlinks. An
+                    # explicit component (e.g. link/*.py) may still follow one.
+                    if is_directory and not path.is_symlink():
+                        yield from select(path, index)
+                    elif not is_directory and index + 1 == len(parts) and path not in emitted:
+                        emitted.add(path)
+                        yield path
+                elif index + 1 < len(parts):
+                    if is_directory:
+                        yield from select(path, index + 1)
+                elif not is_directory and path not in emitted:
+                    emitted.add(path)
+                    yield path
+
+        yield from select(base, 0)
+
     # ── main entry ────────────────────────────────────────────────────
 
     def _run(
@@ -141,54 +220,20 @@ class GlobTool(InfinibayBaseTool):
                 "Ignored entries may be omitted. Set include_ignored=true to include them."
             )
 
-        # Batch git check-ignore for performance: collect all glob results
-        # first, then filter in one pass.
         base = Path(file_path)
-        raw_paths: list[Path] = []
-        for p in base.glob(pattern):
-            if p.is_dir():
-                continue
-            # Depth filter: count path components relative to base
-            if max_depth is not None:
-                parts = p.relative_to(base).parts
-                if len(parts) > max_depth:
-                    continue
-            raw_paths.append(p)
-
-        # Build ignore set via batch git check-ignore
-        ignored_rels: set[str] = set()
-        if not include_ignored and use_git and raw_paths:
-            rel_strs = []
-            for p in raw_paths:
-                rel_strs.append(str(p.relative_to(base)))
-            try:
-                result = subprocess.run(
-                    ["git", "check-ignore", "--stdin", "-z"],
-                    input="\0".join(rel_strs),
-                    capture_output=True, text=True,
-                    cwd=file_path, timeout=10,
-                )
-                if result.returncode <= 1:
-                    ignored_rels = {
-                        s for s in result.stdout.split("\0") if s
-                    }
-            except Exception:
-                pass
+        paths = self._glob_paths(base, pattern, include_ignored, use_git, max_depth)
 
         matches = []
         scanned = 0
 
         try:
-            for fpath in raw_paths:
+            for fpath in paths:
                 parts = fpath.relative_to(base).parts
                 rel = str(fpath.relative_to(base))
 
                 if not include_ignored:
                     if use_git:
-                        # Always skip .git itself; use batch result for the rest
                         if any(p == ".git" for p in parts[:-1]):
-                            continue
-                        if rel in ignored_rels:
                             continue
                     else:
                         # Fallback: skip known junk dirs and dotfiles

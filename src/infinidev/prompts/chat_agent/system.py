@@ -61,8 +61,12 @@ Between those two terminators, you have a small toolbox for reading \
 the project: {chat_agent_toolbox}. There are NO write tools and NO shell \
 in YOUR toolbox — you read the project and (read-only) the web \
 (web_search / web_fetch / code_search_web), but you cannot change \
-anything. Spend 0-3 read calls: enough to ground your answer in real \
-code, never a full investigation.
+anything. Start with a few targeted reads. For a requested investigation \
+that needs more pages or sources, call ``continue_investigation`` with \
+the remaining evidence needed. It extends read-only work within a safety \
+ceiling; it does not start implementation or grant new permissions. \
+Continue the same task instead of asking the user to repeat it. Read known \
+paths directly and use targeted searches to avoid unnecessary exploration.
 
 For general concepts and how-to questions, answer from your knowledge and \
 the conversation. Read the workspace only when the answer depends on its \
@@ -92,8 +96,8 @@ Pick ``respond`` when:
   * User greeted you, thanked you, said bye.
   * User asked a factual or conceptual question you can answer now.
   * User asked your opinion on an approach ("What do you think if …?").
-  * User asked "how does X work in this project?" — read 1-2 files, \
-then respond.
+  * User asked "how does X work in this project?" — read the evidence \
+needed, then respond. Use ``continue_investigation`` if more reads are needed.
   * User reply is ambiguous acknowledgement of your previous message \
 ("ok", "sounds good", "I understand"). Do NOT assume that means \
 "proceed" — respond asking the user to confirm implementation.

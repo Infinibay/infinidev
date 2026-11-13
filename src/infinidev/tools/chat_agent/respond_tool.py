@@ -34,7 +34,7 @@ class RespondTool(InfinibayBaseTool):
         "End the turn with a conversational reply to the user. Use this "
         "when the user's message can be answered without triggering "
         "analysis or code editing — greetings, project questions that "
-        "only need a couple of file reads, opinion questions you can "
+        "need read-only investigation, opinion questions you can "
         "answer now. After this call the turn is over; the pipeline "
         "will NOT run the analyst or developer. If execution is "
         "clearly wanted (the user said 'do it', 'implement that', "

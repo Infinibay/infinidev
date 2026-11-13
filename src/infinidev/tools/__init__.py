@@ -46,7 +46,7 @@ from infinidev.tools.knowledge import (
     DeleteReportTool,
 )
 from infinidev.tools.chat import SendMessageTool
-from infinidev.tools.chat_agent import RespondTool, EscalateTool
+from infinidev.tools.chat_agent import ContinueInvestigationTool, EscalateTool, RespondTool
 from infinidev.tools.planner import (
     BlockGoalTool,
     CompleteGoalTool,
@@ -134,7 +134,7 @@ GENERATION_TOOLS = [GenerateImageTool]
 # Exclusive to the chat agent tier — NOT bound to the developer.
 # These are schema-level terminators (like step_complete); the chat
 # orchestrator parses their args directly from the LLM response.
-CHAT_AGENT_TOOLS = [RespondTool, EscalateTool]
+CHAT_AGENT_TOOLS = [RespondTool, EscalateTool, ContinueInvestigationTool]
 # Exclusive to the planner tier — NOT bound to the chat agent or the
 # developer. The planner orchestrator reads its args directly as the
 # final artifact of the planning turn.

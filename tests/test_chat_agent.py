@@ -654,3 +654,109 @@ def test_semantic_current_request_excludes_injected_routing_context(patch_litell
     assert result.kind == "respond"
     assert seen[0][0] == literal
     assert "Create a migration" in seen[0][1]
+
+
+def test_requested_readonly_investigation_can_continue(patch_litellm, tmp_path):
+    for index in range(5):
+        (tmp_path / f'part{index}.md').write_text(f'Evidence {index}')
+    read = lambda index: _response([_tc('read_file', {
+        'file_path': str(tmp_path / f'part{index}.md'),
+    }, call_id=f'read-{index}')])
+    scripted = patch_litellm([
+        read(0),
+        _response([_tc('continue_investigation', {'reason': 'Four named documents remain.'})]),
+        *[read(index) for index in range(1, 5)],
+        _response([_tc('respond', {'message': 'Verified all five documents.'})]),
+    ])
+    result = run_chat_agent('Read and compare all five documents. Read only.',
+                            workspace_path=str(tmp_path))
+    assert result.kind == 'respond'
+    assert result.reply == 'Verified all five documents.'
+    assert len(scripted.calls) == 7
+
+
+def test_continuation_requires_fresh_evidence(patch_litellm):
+    scripted = patch_litellm([
+        _response([_tc('continue_investigation', {'reason': 'More time please.'})]),
+        _response([_tc('respond', {'message': 'No files were read.'})]),
+    ])
+    result = run_chat_agent('Explain the approach.')
+    assert result.reply == 'No files were read.'
+    tool_results = [m['content'] for m in scripted.calls[-1]['messages']
+                    if m['role'] == 'tool']
+    assert json.loads(tool_results[-1])['continued'] is False
+    assert 'evidence' in json.loads(tool_results[-1])['reason']
+
+
+def test_explicit_iteration_limit_cannot_be_extended(patch_litellm, tmp_path):
+    path = tmp_path / 'a.md'
+    path.write_text('Evidence')
+    scripted = patch_litellm([
+        _response([_tc('read_file', {'file_path': str(path)})]),
+        _response([_tc('continue_investigation', {'reason': 'Need remaining pages.'})]),
+        _response([_tc('respond', {'message': 'Partial result.'})]),
+    ])
+    result = run_chat_agent('Read the document.', max_iterations=3,
+                            workspace_path=str(tmp_path))
+    assert result.reply == 'Partial result.'
+    results = [m['content'] for m in scripted.calls[-1]['messages'] if m['role'] == 'tool']
+    assert json.loads(results[-1])['continued'] is False
+
+
+def test_extended_investigation_respects_total_ceiling(patch_litellm, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, 'CHAT_AGENT_INVESTIGATION_MAX_ITERATIONS', 7)
+    for index in range(5):
+        (tmp_path / f'p{index}.md').write_text(f'Evidence {index}')
+    read = lambda index: _response([_tc('read_file', {
+        'file_path': str(tmp_path / f'p{index}.md'),
+    }, call_id=f'r{index}')])
+    extend = lambda: _response([_tc('continue_investigation', {'reason': 'More pages remain.'})])
+    scripted = patch_litellm([read(0), extend(), read(1), extend(), read(2), read(3), read(4)])
+    result = run_chat_agent('Compare documents. Read only.', workspace_path=str(tmp_path))
+    assert result.kind == 'respond'
+    assert 'safety limit' in result.reply
+    assert len(scripted.calls) == 7
+    results = [json.loads(m['content']) for m in scripted.calls[-1]['messages']
+               if m['role'] == 'tool' and m['content'].startswith('{')]
+    assert any(r.get('continued') is False and 'limit' in r['reason'] for r in results)
+
+
+@pytest.mark.parametrize('reason', ['', '   ', 'x' * 1001])
+def test_invalid_continuation_reason_does_not_extend(patch_litellm, tmp_path, reason):
+    path = tmp_path / 'a.md'
+    path.write_text('Evidence')
+    scripted = patch_litellm([
+        _response([_tc('read_file', {'file_path': str(path)})]),
+        _response([_tc('continue_investigation', {'reason': reason})]),
+        _response([_tc('respond', {'message': 'Answer.'})]),
+    ])
+    assert run_chat_agent('Read the evidence.', workspace_path=str(tmp_path)).reply == 'Answer.'
+    results = [m['content'] for m in scripted.calls[-1]['messages'] if m['role'] == 'tool']
+    assert json.loads(results[-1])['continued'] is False
+
+
+def test_failed_read_cannot_unlock_continuation(patch_litellm, tmp_path):
+    scripted = patch_litellm([
+        _response([_tc('read_file', {'file_path': str(tmp_path / 'absent.md')})]),
+        _response([_tc('continue_investigation', {'reason': 'More pages.'})]),
+        _response([_tc('respond', {'message': 'File is absent.'})]),
+    ])
+    result = run_chat_agent('Read absent.md.', workspace_path=str(tmp_path))
+    assert result.reply == 'File is absent.'
+    results = [m['content'] for m in scripted.calls[-1]['messages'] if m['role'] == 'tool']
+    assert json.loads(results[-1])['continued'] is False
+
+
+def test_extension_consumes_its_evidence_credit(patch_litellm, tmp_path):
+    path = tmp_path / 'a.md'
+    path.write_text('Evidence')
+    scripted = patch_litellm([
+        _response([_tc('read_file', {'file_path': str(path)})]),
+        _response([_tc('continue_investigation', {'reason': 'Next source.'})]),
+        _response([_tc('continue_investigation', {'reason': 'Still more time.'})]),
+        _response([_tc('respond', {'message': 'Answer.'})]),
+    ])
+    assert run_chat_agent('Read sources.', workspace_path=str(tmp_path)).reply == 'Answer.'
+    results = [m['content'] for m in scripted.calls[-1]['messages'] if m['role'] == 'tool']
+    assert json.loads(results[-2])['continued'] is True
+    assert json.loads(results[-1])['continued'] is False

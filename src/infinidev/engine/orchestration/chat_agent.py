@@ -67,9 +67,8 @@ from infinidev.tools.base.context import (
 logger = logging.getLogger(__name__)
 
 
-# The chat prompt allows 0-3 grounding reads before a mandatory routing
-# decision. This ceiling permits one recovery turn after the wrap-up nudge
-# without turning every user message into a second, read-only agent loop.
+# Keep ordinary conversations short; evidence-based extensions are explicit
+# model tool decisions and remain bounded by the total investigation ceiling.
 _DEFAULT_MAX_ITERATIONS = 5
 _MAX_RESULT_CHARS = 8000  # trim overly long tool outputs before re-prompting
 
@@ -125,10 +124,14 @@ def run_chat_agent(
             reply="(empty message)",
         )
 
+    investigation_limit = max_iterations
     if max_iterations is None:
         from infinidev.config.settings import settings
 
-        max_iterations = max(1, int(settings.CHAT_AGENT_MAX_ITERATIONS))
+        investigation_limit = settings.CHAT_AGENT_INVESTIGATION_MAX_ITERATIONS
+        max_iterations = min(
+            max(1, int(settings.CHAT_AGENT_MAX_ITERATIONS)), investigation_limit,
+        )
 
     # Ephemeral agent_id isolates this turn's tool-context binding from the
     # developer agent's context. set_context writes into a process-global
@@ -202,6 +205,7 @@ def run_chat_agent(
             dispatch=dispatch,
             user_input=user_input,
             max_iterations=max_iterations,
+            investigation_limit=investigation_limit,
             hooks=hooks,
             cr_hooks=cr_hooks,
             project_id=project_id,
@@ -285,6 +289,7 @@ def _run_llm_loop(
     dispatch: dict[str, Any],
     user_input: str,
     max_iterations: int,
+    investigation_limit: int | None = None,
     hooks: Any | None = None,
     cr_hooks: Any | None = None,
     project_id: int | None = None,
@@ -302,7 +307,13 @@ def _run_llm_loop(
     # livelock, a repeat in a later turn is a legitimate re-read.
     dup_guard = DuplicateCallGuard()
 
-    for iteration in range(max_iterations):
+    iteration_limit = max_iterations
+    hard_limit = max(max_iterations, investigation_limit or max_iterations)
+    reads_since_extension = 0
+    extended = False
+    iteration = -1
+    while iteration + 1 < iteration_limit:
+        iteration += 1
         if cancel_check is not None and cancel_check():
             return _cancelled_result()
         # ── Lazy ContextRank injection ─────────────────────────────────
@@ -350,17 +361,19 @@ def _run_llm_loop(
         # chances to produce a terminator.
         if (
             not budget_nudged
-            and max_iterations >= 3
-            and iteration == max_iterations - 2
+            and iteration_limit >= 3
+            and iteration == iteration_limit - 2
         ):
             messages.append({
                 "role": "user",
                 "content": (
-                    "You're approaching your iteration budget. On your "
-                    "next call, use `respond` to share what you've found "
-                    "so far, or `escalate` if the user clearly asked for "
-                    "implementation. Don't start a new investigation — "
-                    "summarise and end the turn."
+                    "The current read window is nearly over. If evidence is still "
+                    "needed for the same read-only request, call "
+                    "`continue_investigation` now. Otherwise use `respond`, or "
+                    "`escalate` for requested implementation. "
+                    f"Total safety ceiling: {hard_limit} calls; current call: "
+                    f"{iteration + 1}. At the ceiling, respond with verified findings "
+                    "and any gaps. Do not switch to implementation just for more reads."
                 ),
             })
             budget_nudged = True
@@ -440,14 +453,43 @@ def _run_llm_loop(
         for tc in tool_calls:
             if cancel_check is not None and cancel_check():
                 return _cancelled_result()
-            result = dup_guard.refusal_for(
-                tc.function.name, tc.function.arguments,
-            ) or execute_tool_call(
-                dispatch, tc.function.name, tc.function.arguments,
-            )
+            from infinidev.engine.engine_logging import extract_tool_error
+
+            if tc.function.name == "continue_investigation":
+                from pydantic import ValidationError
+                from infinidev.tools.chat_agent.continue_investigation_tool import (
+                    ContinueInvestigationInput,
+                )
+
+                try:
+                    ContinueInvestigationInput.model_validate(_parse_args(tc))
+                    if reads_since_extension == 0:
+                        denial = "New successful evidence reads are required."
+                    elif iteration_limit >= hard_limit:
+                        denial = "The total iteration limit cannot be extended."
+                    else:
+                        denial = ""
+                except ValidationError:
+                    denial = "Provide a nonempty reason of at most 1000 characters."
+                if not denial:
+                    iteration_limit = min(iteration_limit + 5, hard_limit)
+                    reads_since_extension = 0
+                    budget_nudged = False
+                    extended = True
+                result = json.dumps({
+                    "continued": not bool(denial),
+                    "reason": denial or "Continue the same read-only request.",
+                    "remaining_iterations": iteration_limit - iteration - 1,
+                })
+            else:
+                refusal = dup_guard.refusal_for(tc.function.name, tc.function.arguments)
+                result = refusal or execute_tool_call(
+                    dispatch, tc.function.name, tc.function.arguments,
+                )
+                if not refusal and not extract_tool_error(result):
+                    reads_since_extension += 1
             if cr_hooks is not None:
                 try:
-                    from infinidev.engine.engine_logging import extract_tool_error
                     was_error = bool(extract_tool_error(result))
                     cr_hooks.on_tool_call(
                         tc.function.name, tc.function.arguments, iteration,
@@ -469,6 +511,9 @@ def _run_llm_loop(
 
     if cancel_check is not None and cancel_check():
         return _cancelled_result()
+
+    if extended:
+        return _fallback_respond(reason="investigation_limit")
 
     # Max iterations reached without terminator. Instead of stranding
     # the user with an apology, synthesize an escalation packet from
@@ -688,6 +733,10 @@ _FALLBACK_MESSAGES: dict[str, str] = {
     # exhausts its budget without a terminator, the loop synthesizes
     # an EscalationPacket (see _build_max_iter_escalation) and hands
     # off to the planner/developer instead of replying to the user.
+    "investigation_limit": (
+        "The read-only investigation reached its safety limit before a complete answer. "
+        "No implementation was started."
+    ),
     "empty_respond": "I don't know how to answer that. Please rephrase the question.",
     "empty_escalate": (
         "I detected that you wanted me to do something, but the request "
