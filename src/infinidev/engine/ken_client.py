@@ -26,8 +26,10 @@ Ken tool surface used here (verified against ken-rank 0.11):
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -78,11 +80,24 @@ class MemoryHit:
     tags: list[str] = field(default_factory=list)
     score: float = 0.0
     created_at: str = ""
+    justification: dict[str, Any] | None = None
+    validity: dict[str, Any] | None = None
 
     def render(self, width: int = 240) -> str:
         body = self.content if len(self.content) <= width else self.content[:width] + "…"
         tags = f"  [{', '.join(self.tags)}]" if self.tags else ""
-        return f"{self.topic}{tags}\n{body}"
+        lines = [f"{self.topic}{tags}\n{body}"]
+        if self.justification is not None:
+            lines.append("Justification: " + json.dumps(self.justification, ensure_ascii=False))
+        if self.validity is not None:
+            lines.append("Validity: " + json.dumps(self.validity, ensure_ascii=False))
+        else:
+            lines.append("Validity: not supplied.")
+        lines.append(
+            "Validity describes declared inputs; it does not certify the conclusion "
+            "or its assumptions."
+        )
+        return "\n".join(lines)
 
 
 class KenClient:
@@ -124,6 +139,15 @@ class KenClient:
         """Call a Ken tool, returning its structured payload or ``None``."""
         if self._server is None:
             return None
+        for published in self._manager.list_tools(self._server):
+            if published.name != tool:
+                continue
+            output_format = published.input_schema.get("properties", {}).get("output_format", {})
+            if output_format.get("type") == "string" and (
+                "enum" not in output_format or "json" in output_format["enum"]
+            ):
+                arguments = {**arguments, "output_format": "json"}
+            break
         result = self._manager.try_call(self._server, tool, arguments)
         return None if result is None else result.data
 
@@ -306,6 +330,10 @@ class KenClient:
                 tags=[str(tag) for tag in (row.get("tags") or [])],
                 score=float(row.get("score", 0.0) or 0.0),
                 created_at=str(row.get("created_at", "")),
+                justification=deepcopy(row["justification"])
+                if isinstance(row.get("justification"), dict) else None,
+                validity=deepcopy(row["validity"])
+                if isinstance(row.get("validity"), dict) else None,
             )
             for row in _as_rows(rows)
             if row.get("topic") or row.get("content")
@@ -318,13 +346,17 @@ class KenClient:
         ]
 
     def remember(
-        self, topic: str, content: str, tags: list[str] | None = None
+        self, topic: str, content: str, tags: list[str] | None = None,
+        *, justification: dict[str, Any] | None = None,
     ) -> bool:
-        """Persist a finding so future sessions can recall it."""
+        """Persist a finding; omitting justification revokes any previous one in Ken."""
         payload: dict[str, Any] = {"topic": topic, "content": content}
         if tags:
             payload["tags"] = list(tags)
-        return self._call("ken_remember", payload) is not None
+        if justification is not None:
+            payload["justification"] = deepcopy(justification)
+        result = self._call("ken_remember", payload)
+        return isinstance(result, dict) and result.get("ok") is True
 
     # ── context ranking (index history) ──────────────────────────────
 
@@ -365,7 +397,10 @@ class KenClient:
 
     def memory_search(self, query: str, limit: int = 5) -> list[McpHit]:
         return [
-            McpHit(target=hit.topic, snippet=hit.content, score=hit.score, source="ken")
+            McpHit(
+                target=hit.topic, snippet=hit.render(width=len(hit.content)),
+                score=hit.score, source="ken",
+            )
             for hit in self.recall(query, limit=limit)
         ]
 
