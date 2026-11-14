@@ -750,11 +750,16 @@ def handle_engine(app: InfinidevApp, parts: list[str]) -> None:
     wanted = normalize_mode(raw)
     settings.save_user_settings({"TASK_ENGINE_MODE": wanted})
     reload_all()
-    note = " (beta)" if wanted == "graph_beta" else ""
-    app.add_message(
-        "System", f"Task engine set to {wanted}{note}. Applies from the next task.",
-        "system",
-    )
+    effective = normalize_mode(settings.TASK_ENGINE_MODE)
+    if effective != wanted:
+        message = (
+            f"Engine preference saved as {wanted}; effective mode remains {effective}. "
+            "Check INFINIDEV_TASK_ENGINE_MODE, which overrides saved settings."
+        )
+    else:
+        note = " (beta)" if wanted == "graph_beta" else ""
+        message = f"Task engine set to {wanted}{note}. Applies from the next task."
+    app.add_message("System", message, "system")
     app._update_status_bar()
 
 

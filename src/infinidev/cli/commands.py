@@ -423,6 +423,14 @@ def handle_engine_command(parts: list[str]):
     wanted = normalize_mode(raw)
     settings.save_user_settings({"TASK_ENGINE_MODE": wanted})
     reload_all()
+    effective = normalize_mode(settings.TASK_ENGINE_MODE)
+    if effective != wanted:
+        click.echo(click.style(
+            f"Engine preference saved as {wanted}; effective mode remains {effective}. "
+            "Check INFINIDEV_TASK_ENGINE_MODE, which overrides saved settings.",
+            fg="yellow",
+        ))
+        return
     note = " (beta)" if wanted == "graph_beta" else ""
     click.echo(click.style(
         f"Task engine set to {wanted}{note}. Applies from the next task.", fg="green",

@@ -214,10 +214,14 @@ def run_chat_agent(
         )
         if cancel_check is not None and cancel_check():
             return _cancelled_result()
+        recoverable_fallback = result.reply in (
+            _FALLBACK_MESSAGES["empty_escalate"],
+            _FALLBACK_MESSAGES["investigation_limit"],
+        )
         if (
             result.kind == "respond"
             and not result.error_traceback
-            and result.reply not in _FALLBACK_MESSAGES.values()
+            and (result.reply not in _FALLBACK_MESSAGES.values() or recoverable_fallback)
             and result.reply != "Cancelled."
         ):
             # Reuse the already-built conversation input as bounded data. The
@@ -234,7 +238,9 @@ def run_chat_agent(
                     escalation=_apply(EscalationPacket(
                         user_request=current_request,
                         understanding=decision.understanding,
-                        user_visible_preview="" if result.streamed else result.reply,
+                        user_visible_preview=(
+                            "" if result.streamed or recoverable_fallback else result.reply
+                        ),
                         user_signal="(semantic recovery)",
                         suggested_flow="develop",
                     )),
@@ -557,10 +563,8 @@ def _build_escalate(
     args = _parse_args(tc)
     understanding = text_argument(args.get("understanding"))
     if not understanding:
-        # Defensive: escalate with empty understanding is a useless
-        # handoff. Fall back to respond so the user isn't stranded.
-        # Carry `streamed` so the pipeline still finalizes any orphaned
-        # streaming bubble opened before the (empty) escalate fired.
+        # The bounded semantic check in run_chat_agent can repair this
+        # handoff; otherwise report the routing failure to the user.
         return _fallback_respond(
             reason="empty_escalate", streamed=streamed,
         )
@@ -739,8 +743,8 @@ _FALLBACK_MESSAGES: dict[str, str] = {
     ),
     "empty_respond": "I don't know how to answer that. Please rephrase the question.",
     "empty_escalate": (
-        "I detected that you wanted me to do something, but the request "
-        "isn't clear. Please clarify what to implement and state the expected result."
+        "The chat agent returned an empty developer handoff and could not recover it. "
+        "No implementation was started. Please retry the request."
     ),
     "exception": "I ran into a problem processing your message. Please retry.",
 }

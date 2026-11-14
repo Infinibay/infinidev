@@ -287,11 +287,11 @@ class TestEscalateTerminator:
             _response([_tc("escalate", {"understanding": ""})]),
         ])
         result = run_chat_agent("do something")
-        # Defensive: an escalation with no handoff content would strand
-        # the planner, so the chat agent falls back to a respond asking
-        # for clarification.
+        # If recovery is unavailable, describe the failed handoff rather
+        # than claiming the user's request was ambiguous.
         assert result.kind == "respond"
-        assert "clar" in result.reply.lower() or "?" in result.reply
+        assert "handoff" in result.reply.lower()
+        assert "isn't clear" not in result.reply
 
     def test_suggested_flow_is_pinned_to_develop(self, patch_litellm):
         patch_litellm([
@@ -596,7 +596,6 @@ def test_primary_escalation_skips_recovery(patch_litellm, monkeypatch):
 
 @pytest.mark.parametrize("response", [
     _response([_tc("respond", {"message": ""})]),
-    _response([_tc("escalate", {"understanding": ""})]),
 ])
 def test_fallback_replies_skip_recovery(response, patch_litellm, monkeypatch):
     patch_litellm([response])
@@ -604,11 +603,76 @@ def test_fallback_replies_skip_recovery(response, patch_litellm, monkeypatch):
     assert run_chat_agent("go").kind == "respond"
 
 
-def test_cancellation_during_semantic_recovery_cannot_start_work(patch_litellm, monkeypatch):
+@pytest.mark.parametrize("failure", ["empty_escalate", "investigation_limit"])
+def test_failed_chat_handoff_recovers_requested_test_edits(
+    failure, patch_litellm, monkeypatch, tmp_path,
+):
+    from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+
+    request = "Add two tests in tests.rs only; no production changes, no cargo."
+    if failure == "empty_escalate":
+        responses = [_response([_tc("escalate", {"understanding": ""})])]
+    else:
+        monkeypatch.setattr(settings, "CHAT_AGENT_MAX_ITERATIONS", 2)
+        monkeypatch.setattr(settings, "CHAT_AGENT_INVESTIGATION_MAX_ITERATIONS", 3)
+        path = tmp_path / "tests.rs"
+        path.write_text("// Existing test fixture")
+        responses = [
+            _response([_tc("read_file", {"file_path": str(path)})]),
+            _response([_tc("continue_investigation", {"reason": "Need fixture details"})]),
+            _response([_tc("read_file", {"file_path": str(path)})]),
+        ]
+    patch_litellm(responses)
+    classified_requests = []
+
+    def classify(user_request, reply, *, recent_context):
+        classified_requests.append(user_request)
+        return RoutingDecision(kind="escalate", understanding=request)
+
+    monkeypatch.setattr(chat_agent_mod, "classify_chat_response", classify)
+
+    result = run_chat_agent(request, workspace_path=str(tmp_path), autonomous_hint=True)
+
+    assert result.kind == "escalate"
+    assert result.escalation.user_request == request
+    assert result.escalation.understanding == request
+    assert result.escalation.autonomous is True
+    assert result.escalation.user_visible_preview == ""
+    assert classified_requests == [request]
+
+
+@pytest.mark.parametrize("decision", [None, "respond"])
+def test_empty_handoff_does_not_start_work_without_semantic_confirmation(
+    decision, patch_litellm, monkeypatch,
+):
+    from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+
+    patch_litellm([_response([_tc("escalate", {"understanding": ""})])])
+    monkeypatch.setattr(
+        chat_agent_mod, "classify_chat_response",
+        lambda *a, **kw: (
+            RoutingDecision(kind="respond", understanding="") if decision else None
+        ),
+    )
+
+    result = run_chat_agent("Explain the test fixture; do not edit anything.")
+
+    assert result.kind == "respond"
+    assert "handoff" in result.reply.lower()
+
+
+@pytest.mark.parametrize("empty_handoff", [False, True])
+def test_cancellation_during_semantic_recovery_cannot_start_work(
+    empty_handoff, patch_litellm, monkeypatch,
+):
     from infinidev.engine.orchestration.semantic_routing import RoutingDecision
 
     cancelled = False
-    patch_litellm([_response(content="I will fix it.")])
+    response = (
+        _response([_tc("escalate", {"understanding": ""})])
+        if empty_handoff else _response(content="I will fix it.")
+    )
+    patch_litellm([response])
 
     def classify(*args, **kwargs):
         nonlocal cancelled
@@ -621,12 +685,19 @@ def test_cancellation_during_semantic_recovery_cannot_start_work(patch_litellm, 
     assert result.reply == "Cancelled."
 
 
-def test_semantic_recovery_preserves_streamed_state(patch_litellm, monkeypatch):
+@pytest.mark.parametrize("empty_handoff", [False, True])
+def test_semantic_recovery_preserves_streamed_state(
+    empty_handoff, patch_litellm, monkeypatch,
+):
     from infinidev.engine.orchestration.semantic_routing import RoutingDecision
 
     patch_litellm([])
     monkeypatch.setattr(chat_agent_mod, "_run_llm_loop", lambda **kw: ChatAgentResult(
-        kind="respond", reply="I will fix it.", streamed=True,
+        kind="respond", streamed=True,
+        reply=(
+            chat_agent_mod._FALLBACK_MESSAGES["empty_escalate"]
+            if empty_handoff else "I will fix it."
+        ),
     ))
     monkeypatch.setattr(chat_agent_mod, "classify_chat_response", lambda *a, **kw: RoutingDecision(
         kind="escalate", understanding="Fix it",
@@ -703,7 +774,16 @@ def test_explicit_iteration_limit_cannot_be_extended(patch_litellm, tmp_path):
     assert json.loads(results[-1])['continued'] is False
 
 
-def test_extended_investigation_respects_total_ceiling(patch_litellm, tmp_path, monkeypatch):
+@pytest.mark.parametrize("recovery", [None, "respond"])
+def test_extended_investigation_respects_total_ceiling(
+    recovery, patch_litellm, tmp_path, monkeypatch,
+):
+    from infinidev.engine.orchestration.semantic_routing import RoutingDecision
+
+    monkeypatch.setattr(
+        chat_agent_mod, "classify_chat_response",
+        lambda *a, **kw: RoutingDecision(kind="respond", understanding="") if recovery else None,
+    )
     monkeypatch.setattr(settings, 'CHAT_AGENT_INVESTIGATION_MAX_ITERATIONS', 7)
     for index in range(5):
         (tmp_path / f'p{index}.md').write_text(f'Evidence {index}')
