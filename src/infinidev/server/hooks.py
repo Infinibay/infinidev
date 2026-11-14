@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 class ServerHooks(NoOpHooks):
     """The web renderer uses the same task pipeline as the terminal."""
 
+    persists_session_messages: bool = True
+
     def __init__(self, session: WebSession) -> None:
         self.session = session
 

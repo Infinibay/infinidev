@@ -637,7 +637,8 @@ class TestRespondReplyLandsInChatOnce:
     def test_develop_path_leaves_flag_unset_so_worker_shows_result(self, monkeypatch, temp_db):
         from infinidev.config.settings import settings
 
-        monkeypatch.setattr(settings, "TASK_ENGINE_MODE", "task")
+        # This asserts the legacy developer adapter's worker-owned final display.
+        monkeypatch.setattr(settings, "TASK_ENGINE_MODE", "react")
         from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
         from infinidev.engine.orchestration.escalation_packet import EscalationPacket
         from infinidev.engine.orchestration.pipeline import run_task

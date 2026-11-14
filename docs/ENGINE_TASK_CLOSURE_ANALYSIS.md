@@ -1,5 +1,14 @@
 # Engine Task: análisis del ciclo de cierre y primer tramo de mejora
 
+## Alcance histórico
+
+Las mediciones de este documento corresponden a los adapters y al pipeline de
+Task/Step anteriores al runtime conversacional. Desde la migración de noviembre
+2026, el modo interactivo ordinario `task` entra directamente a `LoopEngine.run_turn`.
+Las cifras de ahorro de este documento no miden ni validan ese nuevo camino. Véase
+[Turnos de conversación](conversation-turns.md) para el contrato y los caminos de
+compatibilidad vigentes.
+
 ## Resumen
 
 **Qué se midió.** Todas las comparaciones son pareadas por `(tarea, repetición)`

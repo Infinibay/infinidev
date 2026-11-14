@@ -771,32 +771,21 @@ def _detect_ollama_capabilities() -> ModelCapabilities:
 def _detect_openai_compatible_capabilities() -> ModelCapabilities:
     """Detect capabilities for an OpenAI-compatible server (llama.cpp, vLLM, TGI, etc.).
 
-    For llama_cpp and vLLM: runs a live probe to test FC support. Modern
-    llama-server and vLLM both support native function calling for most models.
-
-    For generic openai_compatible: conservative defaults (manual mode).
+    Probe the configured endpoint and model for native tool support. Servers
+    without native support retain the manual tool-calling fallback.
     """
     from infinidev.config.settings import settings
 
     provider_id = getattr(settings, "LLM_PROVIDER", "openai_compatible")
     caps: ModelCapabilities
 
-    if provider_id in ("llama_cpp", "vllm"):
-        # vLLM has robust FC — probe it
-        try:
-            from infinidev.config.llm import get_litellm_params
-            caps = _run_probes(get_litellm_params())
-            caps.probed = True
-        except Exception as exc:
-            logger.warning("vLLM probe failed: %s — falling back to manual TC", str(exc)[:200])
-            caps = ModelCapabilities(
-                supports_function_calling=False,
-                supports_tool_choice_required=False,
-                supports_json_mode=False,
-                probed=True,
-            )
-    else:
-        # Generic openai_compatible: conservative defaults
+    try:
+        from infinidev.config.llm import get_litellm_params
+        caps = _run_probes(get_litellm_params())
+        caps.probed = True
+    except Exception as exc:
+        logger.warning("Compatible-server probe failed: %s — falling back to manual TC",
+                       str(exc)[:200])
         caps = ModelCapabilities(
             supports_function_calling=False,
             supports_tool_choice_required=False,

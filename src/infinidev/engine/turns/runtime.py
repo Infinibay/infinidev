@@ -1,0 +1,660 @@
+"""Mechanical conversation runtime, independent of the legacy Step lifecycle."""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import time
+import uuid
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
+
+from pydantic import ValidationError
+
+from infinidev.config.llm import get_litellm_params
+from infinidev.config.model_capabilities import get_model_capabilities
+from infinidev.config.settings import settings
+from infinidev.db.service import _persist_session_runtime_field, get_session_runtime_state
+from infinidev.engine.behavior.reasoning_content import extract_reasoning, reasoning_history_fields
+from infinidev.engine.engine_logging import emit_loop_event
+from infinidev.engine.file_change_tracker import FileChangeTracker
+from infinidev.engine.formats.manual_tool_call import ManualToolCall
+from infinidev.engine.formats.tool_call_format import get_registered_formats
+from infinidev.engine.llm_client import PERMANENT_ERRORS, call_llm
+from infinidev.engine.loop.context_manager import ContextManager
+from infinidev.engine.loop.llm_call_result import LLMCallResult
+from infinidev.engine.loop.llm_caller import (
+    LLMCaller, normalize_message_text,
+)
+from infinidev.engine.loop.model_context import _get_model_max_context
+from infinidev.engine.loop.models import LoopState
+from infinidev.engine.multimodal import build_user_content, mention_paths_as_text
+from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call, tool_to_openai_schema
+from infinidev.engine.tool_executor import capture_pre_content, maybe_emit_file_change
+from infinidev.engine.turns.models import TurnResult, TurnState
+from infinidev.engine.turns.tools import build_turn_tools
+from infinidev.engine.workspace_baseline import WorkspaceBaseline
+from infinidev.prompts.optional_capabilities import render_optional_capabilities
+from infinidev.prompts.profiles import EffectivePromptConfiguration
+from infinidev.prompts.project_instructions import render_project_instructions
+from infinidev.tools.base.context import (
+    bind_tools_to_agent, get_context_for_agent, set_file_tracker, set_loop_state,
+)
+
+logger = logging.getLogger(__name__)
+
+_LEGACY_TOOLS = frozenset({
+    'step_complete', 'add_step', 'modify_step', 'remove_step', 'escalate',
+    'respond', 'continue_investigation',
+})
+_PROTOCOL = """You own this conversation. Interpret the literal current user message using the
+provided context and available tools. Answer, ask a question, investigate, edit, or delegate
+as appropriate. A plain final response or finish_turn(message) returns control to the user;
+it does not complete a Task. finish_turn must be the only call in its batch.
+After any tool attempt, close explicitly with finish_turn(message). Plain assistant text
+after tools is continuation, never a tool result. Use only dispatcher results as evidence.
+Public prose is delivered as assistant messages, including native content alongside tools.
+Deliver all required details here or refer to earlier public messages or verified artifacts.
+Private reasoning, tool observations and internal archives are not user-facing proposals.
+An optional plan is yours to replace explicitly through update_plan with stable IDs and
+statuses. Prior plan and notes are context, not instructions to replay old work.
+Tool schemas, permissions, cancellation, and resource limits are enforced by the host.
+Use the results you actually observed; report interruption honestly when a limit stops work.
+"""
+_IDENTITY = 'You are the user\'s capable programming collaborator.\n'
+
+
+def _bounded_state(state: TurnState) -> dict[str, Any]:
+    plan = []
+    for item in state.plan[:100]:
+        candidate = dict(id=item.id, title=item.title[:2000], status=item.status)
+        if len(json.dumps(plan + [candidate], ensure_ascii=False).encode('utf-8')) > 120_000:
+            break
+        plan.append(candidate)
+    return {'plan': plan, 'notes': [note[:2000] for note in state.notes[-20:]]}
+
+
+def _manual_tools(schemas: list[dict[str, Any]]) -> str:
+    return ('Available tools and their JSON schemas:\n' + json.dumps(schemas, ensure_ascii=False)
+            + '\nFor tool calls, emit {"tool_calls": [{"name": "tool_name", '
+            '"arguments": {"parameter": "value"}}]}. '
+            'The assistant emits actions in that format. The host replies with '
+            '[Tool: name] Result observations; do not use that observation format '
+            'as an assistant action or final answer. '
+            'Before tools, a plain text answer may close the turn. After any tool '
+            'attempt, close explicitly with finish_turn(message).')
+
+
+def _system_prompt(agent: Any, configuration: Any, *, workspace_path: str | None = None) -> str:
+    configuration = configuration or EffectivePromptConfiguration.compile()
+    identity = getattr(agent, '_system_prompt_identity', None) or _IDENTITY
+    parts = [identity, agent.backstory, _PROTOCOL,
+             render_optional_capabilities(configuration)]
+    for hint in getattr(agent, '_tech_hints', None) or []:
+        from infinidev.prompts.tech import get_tech_prompt
+        parts.append(get_tech_prompt(hint))
+    parts.append(render_project_instructions(
+        workspace_path or getattr(agent, 'workspace_path', None)))
+    summaries = getattr(agent, '_session_summaries', None) or []
+    if summaries:
+        parts.append('<session_context>\n' + '\n'.join(summaries) + '\n</session_context>')
+    return '\n\n'.join(part for part in parts if part)
+
+
+def _compact(messages: list[dict[str, Any]]) -> None:
+    references = {id(message): message.get('_archive_reference') for message in messages}
+    manual_results = [message for message in messages if message.get('_tool_result')]
+    for message in manual_results:
+        message['role'] = 'tool'
+    ContextManager.compact_for_pressure(messages)
+    for message in manual_results:
+        message['role'] = 'user'
+    for message in messages:
+        reference = references.get(id(message))
+        if reference and reference not in message.get('content', ''):
+            message['content'] += '\n' + reference
+
+
+def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
+    try:
+        data = get_session_runtime_state(session_id).get('ui_state', {}).get('conversation', {})
+        references = data.get('evidence', [])
+        references = [value[:500] for value in references[-40:]
+                      if isinstance(value, str) and ' turn_provenance_' not in value]
+        return TurnState.model_validate(data), references
+    except (ValidationError, TypeError, ValueError):
+        logger.warning('Ignoring invalid persisted conversation state', exc_info=True)
+        return TurnState(), []
+
+
+def _user_content(text: str, attachments: list[Any] | None, vision: bool) -> Any:
+    if not attachments:
+        return text
+    return (build_user_content if vision else mention_paths_as_text)(text, attachments)
+
+
+def _drain_guidance(engine: Any, messages: list[dict[str, Any]], vision: bool) -> bool:
+    items = engine._user_message_injector._drain_items()
+    for item in items:
+        messages.append({'role': 'user', 'content': _user_content(
+            item.text, list(item.attachments), vision)})
+    return bool(items)
+
+
+def _protocol_payload(text: str) -> bool:
+    """Recognize failed transport envelopes without interpreting user intent."""
+    stripped = text.lstrip()
+    if not stripped.startswith(('<tool_call>', '<function_call>', '<|tool_call',
+                                '<function=', '{')):
+        return False
+    if any(format_type().detect(text) for format_type in get_registered_formats()
+           if format_type.name != 'manual_json'):
+        return True
+    if any(marker in text for marker in (
+        '<tool_call>', '<function_call>', '<|tool_call', '<function=',
+    )):
+        return True
+    stripped = text.lstrip()
+    if stripped.startswith(('{', '```')):
+        return ('"tool_calls"' in text or ('"name"' in text and any(
+            key in text for key in ('"arguments"', '"parameters"'))))
+    return False
+
+
+def _manual_actions(content: str) -> list[ManualToolCall] | None:
+    """Decode only a complete, visible manual action envelope."""
+    text = content.strip()
+    payloads = []
+    try:
+        if text.startswith('<tool_call>'):
+            decoder = json.JSONDecoder()
+            while text:
+                if not text.startswith('<tool_call>'):
+                    return None
+                value, end = decoder.raw_decode(text[len('<tool_call>'):].lstrip())
+                remainder = text[len('<tool_call>'):].lstrip()[end:].lstrip()
+                if not remainder.startswith('</tool_call>'):
+                    return None
+                payloads.append(value)
+                text = remainder[len('</tool_call>'):].strip()
+        else:
+            value = json.loads(text)
+            if not isinstance(value, dict) or not isinstance(value.get('tool_calls'), list):
+                return None
+            payloads = value['tool_calls']
+    except (ValueError, TypeError):
+        return None
+    calls = []
+    for value in payloads:
+        if not isinstance(value, dict):
+            return None
+        function = value.get('function', value)
+        if not isinstance(function, dict) or not isinstance(function.get('name'), str):
+            return None
+        arguments = function.get('arguments', {})
+        calls.append(ManualToolCall(id='turn_' + uuid.uuid4().hex, name=function['name'],
+            arguments=arguments if isinstance(arguments, str) else json.dumps(arguments)))
+    return calls or None
+
+
+def _visible_message(message: Any) -> tuple[str, Any]:
+    """Separate only leading reasoning frames; quoted body data stays opaque."""
+    raw = normalize_message_text(message.content)
+    remaining = raw.lstrip()
+    reasoning = []
+    pairs = (('<think>', '</think>'), ('<thinking>', '</thinking>'),
+             ('<thoughts>', '</thoughts>'))
+    while True:
+        pair = next((pair for pair in pairs if remaining.startswith(pair[0])), None)
+        if pair is None:
+            break
+        opening, closing = pair
+        end = remaining.find(closing, len(opening))
+        if end < 0:
+            return '', message
+        reasoning.append(remaining[len(opening):end].strip())
+        remaining = remaining[end + len(closing):].lstrip()
+    if not reasoning:
+        return raw, message
+    fields = reasoning_history_fields(message)
+    fields['reasoning_content'] = '\n\n'.join(part for part in
+        [extract_reasoning(message).text, *reasoning] if part)
+    return remaining, SimpleNamespace(content=remaining, **fields)
+
+
+def _call(ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]]) -> LLMCallResult:
+    schemas = None if ctx.manual_tc else ctx.tool_schemas
+    caller._record_request_payload(ctx, messages, schemas, mode=(
+        'manual' if ctx.manual_tc else 'function_calling'))
+    provider_messages = [{key: value for key, value in message.items()
+                          if not key.startswith('_')} for message in messages]
+    choice = 'required' if ctx.state.total_tool_calls else 'auto'
+    response = call_llm(ctx.llm_params, provider_messages, schemas, tool_choice=choice,
+        use_json_mode=False,
+        on_request_metadata=ctx.on_request_metadata,
+        on_thinking_chunk=caller._on_thinking_chunk,
+        on_stream_status=caller._on_stream_status)
+    caller._track_usage(ctx, response)
+    choice = response.choices[0]
+    message = choice.message
+    calls = getattr(message, 'tool_calls', None)
+    origin = 'native' if calls else 'none'
+    finish_reason = getattr(choice, 'finish_reason', None)
+    if ctx.manual_tc and not calls and finish_reason != 'length':
+        calls = _manual_actions(normalize_message_text(message.content))
+        if calls:
+            origin = 'parsed_text'
+    if origin == 'parsed_text':
+        # Arguments in the action channel are opaque, including literal think tags.
+        content = normalize_message_text(message.content)
+    else:
+        content, message = _visible_message(message)
+        if ctx.manual_tc and not calls and finish_reason != 'length':
+            calls = _manual_actions(content)
+            if calls:
+                origin = 'parsed_text'
+    return LLMCallResult(message=message, tool_calls=calls,
+        raw_content=content,
+        reasoning_content=extract_reasoning(message).text, finish_reason=finish_reason,
+        tool_call_origin=origin)
+
+
+def _validated_arguments(ctx: Any, call: Any) -> dict[str, Any]:
+    tool = ctx.tool_dispatch.get(call.function.name)
+    if tool is None:
+        raise ValueError(f'Tool {call.function.name!r} is not granted for this turn')
+    raw = call.function.arguments
+    args = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(args, dict):
+        raise ValueError('Tool arguments must be a JSON object')
+    schema = getattr(tool, 'args_schema', None)
+    if schema is not None:
+        unknown = set(args) - set(schema.model_fields)
+        if unknown:
+            raise ValidationError.from_exception_data(schema.__name__, [
+                {'type': 'extra_forbidden', 'loc': (key,), 'input': args[key]}
+                for key in sorted(unknown)])
+        args = schema.model_validate(args).model_dump()
+    return args
+
+
+def _action_message(ctx: Any, result: LLMCallResult, calls: list[Any]) -> dict[str, Any]:
+    """Retain the action channel in the transcript for either transport."""
+    message = {'role': 'assistant', **reasoning_history_fields(result.message)}
+    if ctx.manual_tc:
+        actions = []
+        for call in calls:
+            arguments = call.function.arguments
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    pass
+            actions.append({'name': call.function.name, 'arguments': arguments})
+        message['content'] = json.dumps({'tool_calls': actions}, ensure_ascii=False)
+    else:
+        message['content'] = result.raw_content or None
+        message['tool_calls'] = [dict(id=call.id, type='function', function=dict(
+            name=call.function.name, arguments=call.function.arguments
+            if isinstance(call.function.arguments, str) else json.dumps(call.function.arguments)))
+            for call in calls]
+    return message
+
+
+def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = '',
+             initial_attachments: list[Any] | None = None, task_tools: list[Any] | None = None,
+             max_iterations: int | None = None, max_total_tool_calls: int | None = None,
+             prompt_configuration: Any = None, preserve_file_tracker: bool = False,
+             on_public_message: Callable[[str], None] | None = None) -> TurnResult:
+    """Execute one bounded conversation without creating or advancing a work Task.
+
+    Cancellation belongs to the host turn: this method never clears it. Zero limits
+    mean unlimited. Each invocation accounts for its own usage, including retries.
+    Only host hook continuations preserve the existing file tracker and baseline.
+    """
+    turn_started = time.monotonic()
+    legacy_state = LoopState()  # Usage and existing ToolContext compatibility only.
+    state = TurnState()
+    references: list[str] = []
+    public_messages: list[str] = []
+    ctx = None
+    iterations = 0
+    invalid_batches = 0
+    validation_diagnostics: list[str] = []
+    unclosed_responses = 0
+    receipt = {'run_id': uuid.uuid4().hex, 'closure': 'interrupted', 'dispatches': 0}
+    tool_context = get_context_for_agent(agent.agent_id)
+    session_id = tool_context.session_id or agent.agent_id
+    workspace_path = tool_context.workspace_path or getattr(agent, 'workspace_path', None)
+
+    def trace(event: str, **data: Any) -> None:
+        if ctx is None:
+            return
+        body = json.dumps({'trace': 'turn_provenance', 'run_id': receipt['run_id'],
+                           'iteration': iterations, 'event': event, **data})
+        _archive(ctx, iterations, 'turn_provenance_' + receipt['run_id'] + '_' + event,
+                 {}, body, kind='runtime_trace')
+    max_iterations = settings.LOOP_MAX_ITERATIONS if max_iterations is None else max_iterations
+    max_calls = (settings.LOOP_MAX_TOTAL_TOOL_CALLS if max_total_tool_calls is None
+                 else max_total_tool_calls)
+
+    def outcome(status: str, message: str) -> TurnResult:
+        if status != 'answered' and validation_diagnostics:
+            message += '\nRejected tool batches (no calls executed in these batches):\n'
+            message += '\n'.join(validation_diagnostics)
+        if engine._last_file_tracker is not None:
+            engine._last_file_tracker.reconcile_workspace()
+        engine._last_state = legacy_state
+        engine._last_status = status
+        engine._last_total_tool_calls = legacy_state.total_tool_calls
+        engine._last_turn_receipt = dict(receipt)
+        trace('turn_closed', status=status,
+              message_sha256=hashlib.sha256(message.encode()).hexdigest(), **receipt)
+        try:
+            _persist_session_runtime_field(session_id, 'conversation',
+                {**_bounded_state(state), 'evidence': references[-40:], 'receipt': receipt})
+        except Exception:
+            logger.warning('Conversation state persistence failed', exc_info=True)
+        return TurnResult(message=message, status=status, state=state, engine=engine,
+                          public_messages=list(public_messages), metrics={
+            'observed_iterations': iterations,
+            'observed_tool_calls': legacy_state.total_tool_calls,
+            'observed_prompt_tokens': legacy_state.total_prompt_tokens,
+            'observed_completion_tokens': legacy_state.total_completion_tokens,
+            'tool_calls': legacy_state.total_tool_calls,
+        })
+
+    def publish(content: str) -> None:
+        if not content.strip():
+            return
+        if on_public_message is not None:
+            on_public_message(content)
+        public_messages.append(content)
+        trace('public_message', channel='assistant_content', ordinal=len(public_messages),
+              callback_delivered=on_public_message is not None,
+              content_bytes=len(content.encode()),
+              content_sha256=hashlib.sha256(content.encode()).hexdigest())
+
+    try:
+        if engine.is_cancelled:
+            return outcome('cancelled', 'Conversation cancelled.')
+        state, references = _load_state(session_id)
+        params = get_litellm_params()
+        if params is None:
+            raise RuntimeError('No language model is configured')
+        capabilities = get_model_capabilities()
+        manual = not capabilities.supports_function_calling
+        vision = bool(getattr(capabilities, 'supports_vision', False))
+        tools = list(task_tools if task_tools is not None else getattr(agent, 'tools', []) or [])
+        tools = [tool for tool in tools if tool.name not in _LEGACY_TOOLS
+                 and tool.name not in {'finish_turn', 'update_plan'}]
+        tools.extend(build_turn_tools(state))
+        bind_tools_to_agent(tools, agent.agent_id)
+        schemas = [tool_to_openai_schema(tool) for tool in tools]
+        if getattr(capabilities, 'needs_schema_sanitization', False):
+            from infinidev.engine.schema_sanitizer import _sanitize_tool_schema
+            schemas = [_sanitize_tool_schema(schema) for schema in schemas]
+        system = _system_prompt(agent, prompt_configuration, workspace_path=workspace_path)
+        if manual:
+            system += '\n\n' + _manual_tools(schemas)
+        baseline_started = time.monotonic()
+        tracker = engine._last_file_tracker if preserve_file_tracker else None
+        if tracker is None:
+            tracker = FileChangeTracker(baseline=WorkspaceBaseline.capture(workspace_path))
+        baseline_elapsed_ms = int((time.monotonic() - baseline_started) * 1000)
+        engine._last_file_tracker = tracker
+        set_loop_state(agent.agent_id, legacy_state)
+        set_file_tracker(agent.agent_id, tracker)
+        ctx = SimpleNamespace(agent=agent, agent_id=agent.agent_id, project_id=agent.project_id,
+            session_id=session_id, llm_params=params, manual_tc=manual, is_small=False,
+            state=legacy_state, tools=tools, tool_schemas=schemas,
+            tool_dispatch=build_tool_dispatch(tools), system_prompt=system)
+        caller = LLMCaller(
+            on_thinking_chunk=lambda text: emit_loop_event('loop_thinking_chunk',
+                agent.project_id, agent.agent_id, {'text': text}),
+            on_stream_status=lambda phase, count, name: emit_loop_event('loop_stream_status',
+                agent.project_id, agent.agent_id,
+                {'phase': phase, 'token_count': count, 'tool_name': name}))
+        messages = [{'role': 'system', 'content': system}]
+        if turn_context:
+            messages.append({'role': 'user', 'content':
+                '<conversation_context>\n' + turn_context + '\n</conversation_context>'})
+        if state.plan or state.notes or references:
+            messages.append({'role': 'user', 'content':
+                '<prior_state_context>\n' + json.dumps({**_bounded_state(state), 'evidence': references}, ensure_ascii=False)
+                + '\n</prior_state_context>'})
+        messages.append({'role': 'user', 'content': _user_content(
+            user_input, initial_attachments, vision)})
+        engine._last_turn_messages = messages
+        window = _get_model_max_context(params)
+        trace('turn_setup', scope='run_turn',
+              elapsed_ms=int((time.monotonic() - turn_started) * 1000),
+              baseline_elapsed_ms=baseline_elapsed_ms,
+              baseline_available=tracker.baseline is not None,
+              baseline_files=len(tracker.baseline.files) if tracker.baseline else 0)
+        while True:
+            if engine.is_cancelled:
+                return outcome('cancelled', 'Conversation cancelled.')
+            _drain_guidance(engine, messages, vision)
+            if max_iterations and iterations >= max_iterations:
+                return outcome('exhausted', 'Conversation interrupted: model call limit reached.')
+            if max_calls and legacy_state.total_tool_calls >= max_calls:
+                return outcome('exhausted', 'Conversation interrupted: tool call limit reached.')
+            if ContextManager.under_context_pressure(legacy_state.last_prompt_tokens, window):
+                _compact(messages)
+            iterations += 1
+            trace('runtime_request', mode='manual' if ctx.manual_tc else 'function_calling',
+                  requested_tool_choice='required' if legacy_state.total_tool_calls else 'auto',
+                  finish_turn_offered=any(s['function']['name'] == 'finish_turn'
+                                         for s in ctx.tool_schemas),
+                  message_roles=[m['role'] for m in messages], reminder=unclosed_responses)
+            ctx.on_request_metadata = lambda metadata: trace('provider_request', **metadata)
+            usage_before = (legacy_state.total_prompt_tokens, legacy_state.total_completion_tokens)
+            call_started = time.monotonic()
+            try:
+                result = _call(ctx, caller, messages)
+            except Exception as exc:
+                if engine.is_cancelled:
+                    return outcome('cancelled', 'Conversation cancelled.')
+                if not ctx.manual_tc and any(p in str(exc).lower() for p in PERMANENT_ERRORS):
+                    ctx.manual_tc = True
+                    messages[0]['content'] += '\n\n' + _manual_tools(schemas)
+                    continue
+                raise
+            if engine.is_cancelled:
+                return outcome('cancelled', 'Conversation cancelled.')
+            trace('model_response', source='model', origin=result.tool_call_origin,
+                  elapsed_ms=int((time.monotonic() - call_started) * 1000),
+                  observed_prompt_tokens=legacy_state.total_prompt_tokens - usage_before[0],
+                  observed_completion_tokens=legacy_state.total_completion_tokens - usage_before[1],
+                  finish_reason=result.finish_reason,
+                  content_sha256=hashlib.sha256(result.raw_content.encode()).hexdigest(),
+                  content_bytes=len(result.raw_content.encode()),
+                  calls=[{'id_sha256': hashlib.sha256(call.id.encode()).hexdigest(),
+                          'tool': call.function.name}
+                         for call in result.tool_calls or []])
+            from infinidev.engine.hooks.hooks import HookContext, HookEvent, hook_manager
+            hook_manager.dispatch(HookContext(
+                event=HookEvent.POST_MODEL_MESSAGE,
+                project_id=agent.project_id, agent_id=agent.agent_id,
+                metadata={'raw_content': result.raw_content,
+                          'reasoning_content': result.reasoning_content,
+                          'tool_calls': result.tool_calls, 'messages': messages,
+                          'agent_name': getattr(agent, 'role', agent.agent_id),
+                          'task': user_input, 'plan_snapshot': _bounded_state(state)},
+            ))
+            if result.finish_reason == 'length':
+                return outcome('exhausted',
+                    'Conversation interrupted: model output token limit reached.')
+            if engine.is_cancelled:
+                return outcome('cancelled', 'Conversation cancelled.')
+            calls = result.tool_calls or []
+            if not calls:
+                if _drain_guidance(engine, messages, vision):
+                    continue
+                if legacy_state.total_tool_calls:
+                    if not ctx.manual_tc or not _protocol_payload(result.raw_content):
+                        publish(result.raw_content)
+                    unclosed_responses += 1
+                    if unclosed_responses >= 3:
+                        return outcome('failed', 'Conversation interrupted: explicit '
+                                       'finish_turn missing after tool attempts.')
+                    messages.append({'role': 'assistant', 'content': result.raw_content,
+                                     **reasoning_history_fields(result.message)})
+                    messages.append({'role': 'user', 'content':
+                        'Host protocol: your last message was model-authored text, not a tool '
+                        'result, and did not close this turn. Continue the pending work or call '
+                        'finish_turn with an honest summary of observed results and blockers.'})
+                    trace('protocol_reminder', number=unclosed_responses,
+                          reason='explicit_close_required')
+                    continue
+                if not result.raw_content.strip() or (
+                    ctx.manual_tc and _protocol_payload(result.raw_content)):
+                    return outcome('failed', 'Conversation interrupted: invalid model response.')
+                receipt['closure'] = 'plain_text'
+                return outcome('answered', result.raw_content)
+            unclosed_responses = 0
+            if any(call.function.name == 'finish_turn' for call in calls) and len(calls) != 1:
+                return outcome('failed', 'Conversation interrupted: finish_turn must be the only call.')
+            close_deferred = (calls[0].function.name == 'finish_turn'
+                              and engine._user_message_injector.has_pending)
+            if result.tool_call_origin == 'native' and not close_deferred:
+                publish(result.raw_content)
+            # Validate the entire transport batch before executing any of it.
+            validated = []
+            errors = {}
+            for call in calls:
+                try:
+                    validated.append((call, _validated_arguments(ctx, call)))
+                except (ValueError, TypeError) as exc:
+                    errors[call.id] = (exc.errors(include_input=False, include_context=False,
+                                                include_url=False)
+                                       if isinstance(exc, ValidationError) else
+                                       [{'type': 'invalid_arguments',
+                                         'msg': str(exc)[:500]}])
+            if errors:
+                invalid_batches += 1
+                legacy_state.total_tool_calls += len(calls)
+                # Persist only structural diagnostics, never arguments or model prose.
+                rejected = [{'tool': call.function.name[:100], 'errors': [
+                    {'field': str(problem.get('loc', ('<arguments>',))[0])[:100]
+                              if problem.get('loc') else '<arguments>',
+                     'type': problem['type']}
+                    for problem in errors.get(call.id, [])]}
+                    for call in calls]
+                report = json.dumps({'event': 'tool_validation_rejected',
+                    'batch': iterations, 'executed': False, 'calls': rejected})
+                reference = _archive(ctx, iterations, 'tool_validation_rejected', {}, report)
+                if reference:
+                    references.append(reference)
+                    references[:] = references[-40:]
+                details = [f"{item['tool']}.{problem['field']} ({problem['type']})"
+                           for item in rejected for problem in item['errors']]
+                validation_diagnostics.append(
+                    f"batch {iterations}: " + '; '.join(details[:20]) +
+                    (f'\n{reference}' if reference else '\nDiagnostic archival unavailable.'))
+                validation_diagnostics[:] = validation_diagnostics[-3:]
+                messages.append(_action_message(ctx, result, calls))
+                for call in calls:
+                    body = json.dumps({'error': 'Tool batch rejected before execution.',
+                        'executed': False, 'errors': errors.get(call.id, []),
+                        'recovery': 'Correct the invalid arguments using the tool schema and '
+                                    'resubmit the pending calls. No call in this batch executed.'})
+                    messages.append({'role': 'user', 'content':
+                        f'[Tool: {call.function.name}] Result:\n{body}', '_tool_result': True}
+                        if ctx.manual_tc else {'role': 'tool', 'tool_call_id': call.id,
+                                               'content': body})
+                if invalid_batches >= 3:
+                    return outcome('failed',
+                        'Conversation interrupted: tool argument validation failed in 3 batches.')
+                continue
+            invalid_batches = 0
+            messages.append(_action_message(ctx, result, calls))
+            pending_images = []
+            for call, args in validated:
+                if engine.is_cancelled:
+                    return outcome('cancelled', 'Conversation cancelled.')
+                if max_calls and legacy_state.total_tool_calls >= max_calls:
+                    return outcome('exhausted', 'Conversation interrupted: tool call limit reached.')
+                reference = ''
+                attachments: list[Any] = []
+                if call.function.name == 'finish_turn' and engine._user_message_injector.has_pending:
+                    body = 'Turn close deferred because a new user message arrived. '
+                    if close_deferred:
+                        body += 'Accompanying assistant text was not published. '
+                    body += 'Respond to the update.'
+                else:
+                    engine._begin_tool_batch()
+                    try:
+                        if engine.is_cancelled:
+                            engine._tool_cancel_event.set()
+                        # Count attempts, including host-denied calls, against the global fuse.
+                        legacy_state.total_tool_calls += 1
+                        pre_content = capture_pre_content(call.function.name, args, tracker)
+                        body = execute_tool_call(ctx.tool_dispatch, call.function.name, args,
+                            hook_metadata={'project_id': agent.project_id,
+                                'agent_id': agent.agent_id,
+                                'cancel_event': engine._tool_cancel_event},
+                            attachments_out=attachments)
+                        if call.function.name not in {'finish_turn', 'update_plan'}:
+                            receipt['dispatches'] += 1
+                            trace('tool_result', source='dispatcher',
+                                  call_id_sha256=hashlib.sha256(call.id.encode()).hexdigest(),
+                                  tool=call.function.name,
+                                  output_sha256=hashlib.sha256(body.encode()).hexdigest(),
+                                  output_bytes=len(body.encode()))
+                        maybe_emit_file_change(call.function.name, args, body, pre_content,
+                            tracker, agent.project_id, agent.agent_id, engine._hooks)
+                    finally:
+                        engine._finish_tool_batch()
+                    reference = _archive(ctx, iterations, call.function.name, args, body)
+                    if reference:
+                        references.append(reference)
+                        references[:] = references[-40:]
+                        body += '\n' + reference
+                if ctx.manual_tc:
+                    messages.append({'role': 'user', 'content':
+                        f'[Tool: {call.function.name}] Result:\n{body}',
+                        '_archive_reference': reference, '_tool_result': True})
+                else:
+                    messages.append({'role': 'tool', 'tool_call_id': call.id, 'content': body,
+                        '_archive_reference': reference})
+                if attachments:
+                    pending_images.append({'role': 'user', 'content': _user_content(
+                        'Tool image attachments', attachments, vision)})
+                if engine.is_cancelled:
+                    state.finished, state.reply = False, None
+                    return outcome('cancelled', 'Conversation cancelled.')
+                if state.finished:
+                    if _drain_guidance(engine, messages, vision):
+                        state.finished, state.reply = False, None
+                    else:
+                        receipt['closure'] = 'finish_turn'
+                        return outcome('answered', state.reply or '')
+            messages.extend(pending_images)
+    except Exception as exc:
+        logger.exception('Conversation runtime failed')
+        return outcome('cancelled' if engine.is_cancelled else 'failed',
+            'Conversation cancelled.' if engine.is_cancelled else f'Conversation interrupted: {exc}')
+
+
+def _archive(ctx: Any, iteration: int, name: str, args: dict[str, Any], body: str,
+             *, kind: str = 'tool_output') -> str:
+    """Retain full evidence in bounded archive chunks before prompt compaction."""
+    try:
+        from infinidev.engine.working_memory import MAX_ARCHIVE_CHARS, get_working_memory
+        memory = get_working_memory(ctx.session_id)
+        titles = []
+        archive_id = uuid.uuid4().hex
+        for offset in range(0, len(body), MAX_ARCHIVE_CHARS):
+            title = (f'turn {archive_id} result {iteration}/{ctx.state.total_tool_calls} '
+                     f'{name} part {offset // MAX_ARCHIVE_CHARS + 1}')
+            if memory.remember(title, body[offset:offset + MAX_ARCHIVE_CHARS],
+                               kind=kind, step_index=iteration):
+                titles.append(title)
+        if titles:
+            return '[Archived evidence; recall_context query: ' + titles[0] + ']'
+    except Exception:
+        logger.warning('Conversation evidence archival failed', exc_info=True)
+    return ''

@@ -42,3 +42,28 @@ def test_llm_stream_stops_before_unbounded_chunk_retention(monkeypatch) -> None:
         llm_client._stream_and_assemble(litellm, {}, lambda chunk: None)
 
     assert stream.closed is True
+
+
+def test_stream_limit_diagnoses_events_without_disclosing_content(monkeypatch):
+    deltas = [None, SimpleNamespace(content='secret', reasoning_content='', tool_calls=None),
+              SimpleNamespace(content='', reasoning_content='private', tool_calls=None)]
+    class Stream:
+        closed = False
+        def __iter__(self):
+            for delta in deltas:
+                yield SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+        def close(self):
+            self.closed = True
+    stream = Stream()
+    monkeypatch.setattr(llm_client, '_MAX_STREAM_CHUNKS', 2)
+    with pytest.raises(RuntimeError) as caught:
+        llm_client._stream_and_assemble(SimpleNamespace(completion=lambda **kw: stream), {},
+                                       lambda text: None)
+    message = str(caught.value)
+    assert 'chunks=3' in message
+    assert 'empty_chunks=1' in message
+    assert 'content_bytes=6' in message
+    assert 'reasoning_bytes=7' in message
+    assert 'not token counts' in message
+    assert 'secret' not in message and 'private' not in message
+    assert stream.closed

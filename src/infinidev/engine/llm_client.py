@@ -128,35 +128,45 @@ def _stream_and_assemble(
     content_buffer = ""
     token_count = 0
     stream_text_bytes = 0
+    content_bytes = reasoning_bytes = argument_bytes = empty_chunks = 0
     detected_tool: str | None = None
 
     try:
         for chunk in stream:
             chunks.append(chunk)
+            choices = getattr(chunk, 'choices', None)
+            delta = getattr(choices[0], 'delta', None) if choices else None
+            reasoning_size = len(extract_reasoning(delta).text.encode('utf-8')) if delta else 0
+            content_size = len((getattr(delta, 'content', None) or '').encode('utf-8'))
+            arguments_size = sum(len(str(getattr(getattr(tc, 'function', None),
+                'arguments', None) or '').encode('utf-8'))
+                for tc in getattr(delta, 'tool_calls', None) or [])
+            content_bytes += content_size
+            reasoning_bytes += reasoning_size
+            argument_bytes += arguments_size
+            stream_text_bytes = content_bytes + reasoning_bytes + argument_bytes
+            empty_chunks += int(not (content_size or reasoning_size or arguments_size))
+            diagnostic = (
+                f'chunks={len(chunks)}, empty_chunks={empty_chunks}, '
+                f'content_bytes={content_bytes}, reasoning_bytes={reasoning_bytes}, '
+                f'argument_bytes={argument_bytes}; chunk counts are not token counts'
+            )
             if len(chunks) > _MAX_STREAM_CHUNKS:
                 raise RuntimeError(
-                    f"LLM stream exceeded safety limit of {_MAX_STREAM_CHUNKS:,} chunks"
+                    f"LLM stream exceeded safety limit of {_MAX_STREAM_CHUNKS:,} chunks; "
+                    + diagnostic
                 )
+            if stream_text_bytes > _MAX_STREAM_TEXT_BYTES:
+                raise RuntimeError('LLM stream exceeded the 32 MiB in-memory safety limit; '
+                                   + diagnostic)
             try:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if not delta:
                     continue
-                reasoning_envelope = extract_reasoning(delta)
                 reasoning = reasoning_stream.consume(delta)
                 content = getattr(delta, "content", None) or ""
-                stream_text_bytes += len(reasoning_envelope.text.encode("utf-8"))
-                stream_text_bytes += len(content.encode("utf-8"))
 
                 tc_deltas = getattr(delta, "tool_calls", None)
-                for tc_delta in tc_deltas or []:
-                    fn = getattr(tc_delta, "function", None)
-                    arguments = getattr(fn, "arguments", None) if fn else None
-                    if arguments:
-                        stream_text_bytes += len(str(arguments).encode("utf-8"))
-                if stream_text_bytes > _MAX_STREAM_TEXT_BYTES:
-                    raise RuntimeError(
-                        "LLM stream exceeded the 32 MiB in-memory safety limit"
-                    )
 
                 if reasoning:
                     token_count += 1
@@ -268,6 +278,7 @@ def call_llm(
     retry_attempts: int | None = None,
     use_json_mode: bool = True,
     thinking_enabled: bool | None = None,
+    on_request_metadata: Any | None = None,
 ) -> Any:
     """Call litellm.completion with retry for transient errors.
 
@@ -373,6 +384,15 @@ def call_llm(
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
+            if on_request_metadata is not None:
+                on_request_metadata({
+                    'scope': 'litellm_input', 'attempt': attempt,
+                    'tool_choice': kwargs.get('tool_choice'),
+                    'tools': [t.get('function', {}).get('name')
+                              for t in kwargs.get('tools') or []],
+                    'message_roles': [m.get('role') for m in kwargs.get('messages') or []],
+                    'streaming': use_streaming,
+                })
             if use_streaming:
                 response = _stream_and_assemble(
                     litellm, kwargs,

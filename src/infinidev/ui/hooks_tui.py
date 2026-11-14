@@ -33,6 +33,8 @@ class TUIHooks:
     is the standard way to schedule a redraw from any thread.
     """
 
+    persists_session_messages: bool = True
+
     def __init__(self, app: InfinidevApp) -> None:
         self._app = app
         # Set True once the pipeline has already displayed the final chat

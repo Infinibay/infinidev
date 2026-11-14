@@ -38,6 +38,8 @@ class LLMCallResult:
     raw_content: str = ""
     reasoning_content: str = ""
     forced_step_result: StepResult | None = None   # Set when retries exhausted
+    finish_reason: str | None = None
+    tool_call_origin: str = "none"
     should_retry: bool = False                      # True on FC→manual switch
 
 

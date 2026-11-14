@@ -656,3 +656,22 @@ class TestExtractToolError:
     def test_json_without_error_key(self):
         """JSON without 'error' key returns empty."""
         assert _extract_tool_error(json.dumps({"result": "ok"})) == ""
+
+
+def test_request_metadata_reports_effective_choice_without_content(monkeypatch):
+    from infinidev.config.settings import settings
+    monkeypatch.setattr(settings, 'LLM_PROVIDER', 'minimax')
+    monkeypatch.setattr('infinidev.config.model_capabilities.get_model_capabilities',
+        lambda: SimpleNamespace(supports_json_mode=False, supports_tool_choice_required=False))
+    monkeypatch.setattr('litellm.completion', lambda **kwargs: object())
+    metadata = []
+    call_llm({'model': 'minimax/MiniMax-M3'},
+        [{'role': 'user', 'content': 'private-input'}],
+        tools=[{'type': 'function', 'function': {'name': 'finish_turn',
+            'parameters': {'type': 'object', 'properties': {}}}}],
+        tool_choice='required', retry_attempts=1, on_request_metadata=metadata.append)
+    assert metadata[0]['scope'] == 'litellm_input'
+    assert metadata[0]['tool_choice'] == 'auto'
+    assert metadata[0]['tools'] == ['finish_turn']
+    assert metadata[0]['message_roles'] == ['user']
+    assert 'private-input' not in str(metadata)

@@ -26,6 +26,7 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 from infinidev.config.settings import settings
@@ -73,6 +74,7 @@ from infinidev.engine.loop.tool_processor import ToolProcessor
 from infinidev.engine.loop.tool_runner import ToolRunner
 from infinidev.engine.loop.user_message_injector import UserMessageInjector
 from infinidev.engine.file_change_tracker import FileChangeTracker
+from infinidev.engine.turns.models import TurnResult
 from infinidev.engine.engine_logging import (
     emit_loop_event as _emit_loop_event,
     emit_log as _emit_log,
@@ -762,6 +764,23 @@ class LoopEngine(AgentEngine):
         # Fetched on the first iteration of a run, rendered on all of them.
         self._project_knowledge: list[dict] = []
         self._explore_attempts: dict[int, int] = {}
+
+    def run_turn(
+        self, agent: Any, user_input: str, *, turn_context: str = "",
+        initial_attachments: list[Any] | None = None,
+        task_tools: list[Any] | None = None, max_iterations: int | None = None,
+        max_total_tool_calls: int | None = None, prompt_configuration: Any = None,
+        preserve_file_tracker: bool = False,
+        on_public_message: Callable[[str], None] | None = None,
+    ) -> "TurnResult":
+        """Run an agent-owned conversation without a legacy work Task."""
+        from infinidev.engine.turns.runtime import run_turn
+
+        return run_turn(self, agent, user_input, turn_context=turn_context,
+            initial_attachments=initial_attachments, task_tools=task_tools,
+            max_iterations=max_iterations, max_total_tool_calls=max_total_tool_calls,
+            prompt_configuration=prompt_configuration, preserve_file_tracker=preserve_file_tracker,
+            on_public_message=on_public_message)
 
     def inject_message(
         self, message: str, attachments: list[Any] | None = None,

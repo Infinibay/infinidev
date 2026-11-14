@@ -471,3 +471,58 @@ def test_verbatim_budget_zero_keeps_every_summary(monkeypatch):
     )
     assert "touched file1.py" in prompt
     assert "shown as one line each" not in prompt
+
+
+def test_current_turn_evidence_survives_old_step_indexes_and_trace_volume(memory):
+    from infinidev.tools.base.db import execute_with_retry
+    def seed(conn):
+        rows = []
+        for i in range(2001):
+            rows.append((f'old-{i}', memory.session_id, 999, 'note', 'old note',
+                         f'old-content-{i}', f'old-hash-{i}', '2000-01-01T00:00:00+00:00'))
+            rows.append((f'trace-{i}', memory.session_id, 1000, 'runtime_trace', 'trace',
+                         f'trace-content-{i}', f'trace-hash-{i}', '9999-01-01T00:00:00+00:00'))
+        conn.executemany('INSERT INTO working_memory '
+            '(id,session_id,step_index,kind,title,content,content_hash,created_at) '
+            'VALUES (?,?,?,?,?,?,?,?)', rows)
+        conn.commit()
+    execute_with_retry(seed, db_path=memory._db_path)
+    memory.remember('Current evidence', 'unique-current-evidence-sentinel', step_index=1)
+    rows = memory._load_rows(all_sessions=False)
+    assert any(row[5] == 'unique-current-evidence-sentinel' for row in rows)
+    assert all(row[3] != 'runtime_trace' for row in rows)
+    assert memory.search('unique-current-evidence-sentinel')
+
+
+def test_trace_is_durable_without_semantic_embedding(memory, monkeypatch):
+    enqueued = []
+    memory._embed_enabled = True
+    monkeypatch.setattr(memory, '_enqueue_embed', enqueued.append)
+    assert memory.remember('Trace', '{"trace":"turn_provenance"}', kind='runtime_trace')
+    assert not enqueued
+    records = memory.recent_records(kinds={'runtime_trace'})
+    assert len(records) == 1
+    assert records[0].kind == 'runtime_trace'
+
+
+def test_exact_archive_reference_bypasses_recall_window_and_embedding_wait(memory, monkeypatch):
+    from infinidev.tools.base.db import execute_with_retry
+    title = 'turn unique-archive result 1/1 read_file part 1'
+    assert memory.remember(title, 'old evidence still accessible')
+    def seed(conn):
+        conn.executemany('INSERT INTO working_memory '
+            '(id,session_id,step_index,kind,title,content,content_hash,created_at) '
+            'VALUES (?,?,?,?,?,?,?,?)',
+            [(f'new-{i}', memory.session_id, 1, 'note', f'newer-{i}',
+              f'newer-content-{i}', f'newer-hash-{i}', '9999-01-01T00:00:00+00:00')
+             for i in range(2001)])
+        conn.commit()
+    execute_with_retry(seed, db_path=memory._db_path)
+    assert not any(row[4] == title for row in memory._load_rows(all_sessions=False))
+    def unexpected_wait(*args, **kwargs):
+        raise AssertionError('Exact reference must not wait for embeddings')
+    monkeypatch.setattr(memory, 'flush', unexpected_wait)
+    result = memory.search(title)
+    assert len(result) == 1
+    assert result[0].content == 'old evidence still accessible'
+    assert result[0].score == 1.0

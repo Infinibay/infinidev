@@ -358,22 +358,15 @@ class Settings(BaseSettings):
     # runner list (pytest/jest/cargo/etc.) used by the guidance detector.
     LOOP_CUSTOM_TEST_COMMANDS: str = ""
 
-    # ── Task engine selection (docs/GRAPH_ENGINE_BETA_DESIGN.md §9) ────
-    # ``task`` is the default because it is measured, not because it is
-    # newer. Over 10 task shapes: same success rate, −82.9 % prompt tokens
-    # and −61.5 % latency (paired sign test, p<0.05). Over ``research-audit``
-    # — the read-only, one-deliverable shape the orchestrator was designed
-    # for — 3/3 vs 2/3 success at a 9.4× lower token median. The reason is
-    # structural: the orchestrator principal holds no edit tool, and
-    # workspace-writing workers are serialized by ``TeamRuntime``
-    # (``engine/team/runtime.py``), so delegation cannot parallelise any
-    # work that touches code.
-    #
-    # ``orchestrator`` stays fully supported and explicit; a later round can
-    # route to it from ``auto`` once it has a shape where it wins. ``staged``
-    # and ``react`` remain compatibility modes and ``graph_beta`` an
-    # experimental branching mode, as before.
-    # Measurement: docs/ENGINE_TASK_CLOSURE_ANALYSIS.md §6.1.8.
+    # ── Conversation and compatibility engine selection ───────────────
+    # Default interactive ``task`` turns go directly to the principal's
+    # conversational runtime (LoopEngine.run_turn). The agent owns request
+    # interpretation; finish_turn returns control without completing a Task.
+    # Explicit --think and /auto retain legacy adapters during migration.
+    # ``orchestrator``, ``auto``, ``staged``, ``react`` and ``graph_beta``
+    # retain their configured adapter contracts. See docs/conversation-turns.md.
+    # Historical Task-adapter benchmarks in ENGINE_TASK_CLOSURE_ANALYSIS.md
+    # do not measure the new conversational default.
     TASK_ENGINE_MODE: str = "task"  # orchestrator | auto | task | react | staged | graph_beta
     TEAM_MAX_WORKERS: int = Field(default=3, ge=1, le=16)
     TEAM_MAX_AGENTS: int = Field(default=12, ge=1, le=100)

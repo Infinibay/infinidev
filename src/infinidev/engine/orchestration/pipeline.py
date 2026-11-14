@@ -4,8 +4,8 @@ This module owns the entire task lifecycle as a single function
 :func:`run_task`:
 
 The default principal receives the message directly and decides whether to
-answer, inspect evidence or delegate workers. It owns tickets and reviews;
-the user supplies the task without selecting an orchestration command.
+answer, inspect evidence, edit or delegate workers. A conversational reply
+returns control without completing a work Task.
 Explicit compatibility engines retain their chat-router/planner pipelines.
 
 Every side effect that needs to reach a human (showing the chat reply,
@@ -66,6 +66,8 @@ class OrchestrationHooks(Protocol):
     about how a UI presents data. A headless test can use :class:`NoOpHooks`
     to drop everything on the floor.
     """
+
+    persists_session_messages: bool
 
     # ── Status / phase tracking ──────────────────────────────────────────
     def on_phase(self, phase: Phase) -> None:
@@ -941,10 +943,6 @@ def run_task(
         # described this same request.
         runtime.append_chat("user", user_input)
         ken_context = _ken_turn_context(user_input, session_id)
-    root_task = runtime.add_task(
-        "Follow-up requested by hook" if _hook_reentry else "Working on your request"
-    )
-    runtime.start_next_task()
 
     # ── task_start hook ─────────────────────────────────────────────────
     # Its output rides along to both consumers of the turn: the chat agent
@@ -1027,7 +1025,6 @@ def run_task(
         )
 
     # ── Chat agent ──────────────────────────────────────────────────────
-    hooks.on_phase("chat")
     agent_id = getattr(agent, "agent_id", None) or getattr(agent, "id", None)
     ctx = get_context_for_agent(agent_id) if agent_id else None
     # Fall back to the current process context (thread-local / ContextVar /
@@ -1054,7 +1051,17 @@ def run_task(
     # activate_context would have written.
     if agent_project_id is None:
         agent_project_id = getattr(agent, "project_id", None)
-    target_repository = resolve_referenced_repository(user_input, agent_workspace)
+    from infinidev.config.settings import settings as _settings
+    from infinidev.engine.engines.routing import ENGINE_ORCHESTRATOR, normalize_mode
+
+    conversational = (
+        normalize_mode(_settings.TASK_ENGINE_MODE) == "task"
+        and not autonomous and not use_phase_engine
+    )
+    target_repository = (
+        (getattr(ctx, "repository_path", None) or agent_workspace)
+        if conversational else resolve_referenced_repository(user_input, agent_workspace)
+    )
     # The per-agent ToolContext is intentionally cleared when the developer
     # deactivates, but review and deterministic verification run afterwards.
     # Persist the resolved target on the engine for the whole turn so those
@@ -1079,12 +1086,43 @@ def run_task(
             "and treat conflicting absolute repository paths inside the brief as stale.\n"
             "</repository-target>"
         )
+        if conversational:
+            repository_context = (
+                '<workspace-context authority="runtime">\n'
+                f"Default tool working directory: {target_repository}\n"
+                "This is the host-provided default. Supply an explicit tool cwd when "
+                "the current request requires another directory.\n"
+                "</workspace-context>"
+            )
         turn_context = _join_blocks(turn_context, repository_context)
         chat_input = f"{user_input}\n\n{turn_context}"
         hooks.on_status("info", f"Target repository: {display_target}")
-    from infinidev.config.settings import settings as _settings
-    from infinidev.engine.engines.routing import ENGINE_ORCHESTRATOR, normalize_mode
+    if conversational:
+        from infinidev.engine.session_context import render_session_context
 
+        turn_context = _join_blocks(
+            render_session_context(session_id, user_input), turn_context,
+        )
+        if force_gather or _settings.GATHER_ENABLED:
+            gathered, _ = _run_gather_phase(
+                user_input=user_input, agent=agent, task_prompt=("", ""),
+                session_id=session_id, force_gather=force_gather, hooks=hooks,
+                prompt_configuration=prompt_configuration,
+            )
+            turn_context = _join_blocks(turn_context, gathered)
+        return _run_principal_turn(
+            agent=agent, engine=engine, user_input=user_input,
+            session_id=session_id, turn_context=turn_context,
+            attachments=attachments, hooks=hooks, runtime=runtime,
+            repository_path=target_repository,
+            prompt_configuration=prompt_configuration, skip_instruction=_hook_reentry,
+        )
+
+    root_task = runtime.add_task(
+        "Follow-up requested by hook" if _hook_reentry else "Working on your request"
+    )
+    runtime.start_next_task()
+    hooks.on_phase("chat")
     orchestrating = normalize_mode(_settings.TASK_ENGINE_MODE) == ENGINE_ORCHESTRATOR
     if orchestrating:
         from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
@@ -1465,6 +1503,156 @@ def run_task(
     _close_runtime_task(runtime, result, _turn_status)
     runtime.append_chat("assistant", result)
     _report_turn_end_to_ken(result, session_id)
+    return result
+
+
+def _run_principal_turn(
+    *, agent: Any, engine: Any, user_input: str, session_id: str,
+    turn_context: str, attachments: list[Any] | None, hooks: OrchestrationHooks,
+    runtime: Any, repository_path: str | None,
+    prompt_configuration: EffectivePromptConfiguration, skip_instruction: bool,
+) -> str:
+    """Close a conversational turn without creating or advancing work Tasks."""
+    from infinidev.config.settings import settings
+    from infinidev.engine.turns.models import TurnResult
+    from infinidev.engine.user_hooks import UserHookEvent, task_instruction
+    from infinidev.tools.base.context import set_repository_path
+
+    remaining_iterations = settings.TASK_MAX_ITERATIONS
+    remaining_tools = settings.TASK_MAX_TOOL_CALLS
+    result = "Conversation failed: the agent returned an invalid turn result."
+    status = "failed"
+    reply_marked = False
+    history_initialized = False
+
+    def publish(message: str, *, final: bool = False) -> None:
+        nonlocal reply_marked, history_initialized
+        from infinidev.config.secrets import redact
+        from infinidev.db.service import (
+            execute_with_retry, register_session, store_conversation_turn, store_session_message,
+        )
+
+        message = redact(message)
+        runtime.append_chat("assistant", message, turn_complete=final)
+        # Frontends already persist the returned final reply. The pipeline owns
+        # earlier parts, which never appear in that return value.
+        if not final:
+            if not history_initialized:
+                exists = execute_with_retry(lambda conn: conn.execute(
+                    "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)).fetchone())
+                if not exists:
+                    # Direct API callers may not have run frontend session setup.
+                    # Unknown workspace avoids applying retention to other sessions.
+                    register_session(session_id)
+                history_initialized = True
+            store_conversation_turn(session_id, "assistant", message, message[:200])
+            if getattr(hooks, 'persists_session_messages', False) is not True:
+                store_session_message(session_id, {
+                    'role': 'assistant', 'content': message, 'turn_complete': False})
+        hooks.notify_stream_end("Infinidev", "agent")
+        hooks.notify("Infinidev", message, "agent")
+        if not reply_marked:
+            mark_shown = getattr(hooks, "mark_reply_shown", None)
+            if callable(mark_shown):
+                mark_shown()
+            reply_marked = True
+
+    hooks.on_phase("execute")
+    agent.activate_context(session_id=session_id)
+    agent_id = getattr(agent, "agent_id", None) or getattr(agent, "id", None)
+    if agent_id:
+        set_repository_path(agent_id, repository_path)
+    try:
+        for pass_index in range(2):
+            if getattr(engine, "is_cancelled", False):
+                status, result = "cancelled", "Conversation cancelled."
+                break
+            turn = engine.run_turn(
+                agent, user_input, turn_context=turn_context,
+                initial_attachments=attachments if pass_index == 0 else None,
+                max_iterations=remaining_iterations,
+                max_total_tool_calls=remaining_tools,
+                prompt_configuration=prompt_configuration,
+                preserve_file_tracker=bool(pass_index),
+                on_public_message=publish,
+            )
+            valid = (
+                isinstance(turn, TurnResult)
+                and turn.status in {"answered", "cancelled", "exhausted", "failed"}
+                and isinstance(turn.message, str) and bool(turn.message.strip())
+            )
+            if valid:
+                status, result = turn.status, turn.message
+            else:
+                status = "failed"
+                result = "Conversation failed: the agent returned an invalid turn result."
+            if getattr(engine, "is_cancelled", False):
+                status, result = "cancelled", "Conversation cancelled."
+            if pass_index:
+                break
+            followup = _task_end_hook(
+                UserHookEvent.TASK_END_INSTRUCTION,
+                user_input=user_input, session_id=session_id, result=result,
+                files_changed=_turn_changed_files(engine), status=status,
+                skip=skip_instruction,
+            )
+            if getattr(engine, "is_cancelled", False):
+                status, result = "cancelled", "Conversation cancelled."
+                break
+            if not followup or status != "answered":
+                break
+            publish(result)
+            # An absent or invalid usage counter must never grant another
+            # model call under a finite user-configured budget.
+            limits = [remaining_iterations, remaining_tools]
+            for index, key in enumerate(("observed_iterations", "observed_tool_calls")):
+                if limits[index] <= 0:
+                    continue
+                used = turn.metrics.get(key)
+                if type(used) is not int or used < 0:
+                    status = "failed"
+                    result = (
+                        "Conversation failed: continuation usage counters are missing or invalid."
+                    )
+                    break
+                limits[index] = max(0, limits[index] - used)
+                if not limits[index]:
+                    status = "exhausted"
+                    result = "Conversation exhausted its budget before the hook continuation."
+                    break
+            if status != "answered":
+                break
+            remaining_iterations, remaining_tools = limits
+            turn_context = _join_blocks(
+                turn_context,
+                '<prior-turn-response authority="context">\n' + result
+                + "\n</prior-turn-response>", task_instruction(followup),
+            )
+    except Exception:
+        logger.exception("Conversational runtime failed")
+        status, result = "failed", "Conversation failed while running the agent."
+    finally:
+        agent.deactivate()
+
+    _store_task_hook_note(session_id, _task_end_hook(
+        UserHookEvent.TASK_END_SUMMARY,
+        user_input=user_input, session_id=session_id, result=result,
+        files_changed=_turn_changed_files(engine), status=status,
+    ))
+    if getattr(engine, "is_cancelled", False):
+        status, result = "cancelled", "Conversation cancelled."
+    publish(result, final=True)
+    receipt = getattr(engine, '_last_turn_receipt', None)
+    if isinstance(receipt, dict):
+        hooks.on_status('info',
+            f"Host record: {receipt['dispatches']} tool dispatches; "
+            f"workspace changed: {bool(_turn_changed_files(engine))}; "
+            f"closure: {receipt['closure']}; trace: {receipt['run_id']}.")
+    if status != "answered":
+        hooks.on_status("error" if status == "failed" else "warn",
+                        f"Conversation status: {status}.")
+    _report_turn_end_to_ken(result, session_id)
+    hooks.on_phase("idle")
     return result
 
 

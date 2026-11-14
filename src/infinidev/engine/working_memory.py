@@ -423,6 +423,10 @@ def _ensure_table(db_path: str | None = None) -> None:
             ");"
             "CREATE INDEX IF NOT EXISTS working_memory_session_idx"
             " ON working_memory(session_id, step_index);"
+            "CREATE INDEX IF NOT EXISTS working_memory_session_recent_idx"
+            " ON working_memory(session_id, created_at);"
+            "CREATE INDEX IF NOT EXISTS working_memory_session_title_idx"
+            " ON working_memory(session_id, title);"
             "CREATE UNIQUE INDEX IF NOT EXISTS working_memory_dedup_idx"
             " ON working_memory(session_id, content_hash);"
         )
@@ -799,7 +803,7 @@ class WorkingMemory:
             if not inserted:
                 return False
             self._seen_hashes.add(digest)
-        if self._embed_enabled:
+        if self._embed_enabled and record.kind != 'runtime_trace':
             self._enqueue_embed(record)
         return True
 
@@ -927,8 +931,26 @@ class WorkingMemory:
         Semantic when embeddings are available, keyword-scored otherwise;
         either way the caller gets records, never an exception.
         """
-        if not self._ready or not query.strip():
+        if not self._ready or not query.strip() or limit <= 0:
             return []
+        def _exact(conn):
+            where = 'title = ?' if all_sessions else 'title = ? AND session_id = ?'
+            params = (query.strip(), limit) if all_sessions else (
+                query.strip(), self.session_id, limit)
+            return conn.execute(
+                "SELECT id, session_id, step_index, kind, title, content,"
+                " embedding, embedding_space, created_at FROM working_memory WHERE " + where
+                + " ORDER BY created_at DESC, rowid DESC LIMIT ?", params).fetchall()
+
+        try:
+            exact = execute_with_retry(_exact, db_path=self._db_path) or []
+        except Exception:
+            logger.debug("working_memory exact lookup failed", exc_info=True)
+            exact = []
+        if exact:
+            records = [_row_to_record(row, 1.0) for row in exact] if min_score <= 1.0 else []
+            self._recalled += len(records)
+            return records
         # Generous: the first call in a process pays for loading the embedding table.
         # Missing the window is survivable (keyword scoring), so this is a
         # ceiling, not a typical cost.
@@ -944,19 +966,17 @@ class WorkingMemory:
         self._recalled += len(results[:limit])
         return results[:limit]
 
-    def _load_rows(self, *, all_sessions: bool) -> list[tuple]:
+    def _load_rows(self, *, all_sessions: bool, include_traces: bool = False) -> list[tuple]:
         def _select(conn):
-            if all_sessions:
-                return conn.execute(
-                    "SELECT id, session_id, step_index, kind, title, content,"
-                    " embedding, embedding_space, created_at FROM working_memory"
-                    " ORDER BY created_at DESC LIMIT 2000"
-                ).fetchall()
+            where = '1 = 1' if all_sessions else 'session_id = ?'
+            params = () if all_sessions else (self.session_id,)
+            if not include_traces:
+                where += " AND kind != 'runtime_trace'"
             return conn.execute(
                 "SELECT id, session_id, step_index, kind, title, content,"
                 " embedding, embedding_space, created_at FROM working_memory"
-                " WHERE session_id = ? ORDER BY step_index DESC LIMIT 2000",
-                (self.session_id,),
+                " WHERE " + where + " ORDER BY created_at DESC, rowid DESC LIMIT 2000",
+                params,
             ).fetchall()
 
         try:
@@ -974,7 +994,8 @@ class WorkingMemory:
         """Return recent records with archive provenance, newest first."""
 
         bounded = max(1, min(int(limit), 200))
-        records = [_row_to_record(row, 0.0) for row in self._load_rows(all_sessions=False)]
+        records = [_row_to_record(row, 0.0) for row in self._load_rows(
+            all_sessions=False, include_traces=bool(kinds and 'runtime_trace' in kinds))]
         if kinds is not None:
             records = [record for record in records if record.kind in kinds]
         return records[:bounded]
