@@ -21,6 +21,7 @@ from infinidev.engine.analysis.staged_planning import (
     tasks_missing_completion_evidence,
 )
 from infinidev.engine.formats._normalize import normalize_tool_arguments_json
+from infinidev.engine.formats.tool_call_parser import parse_text_tool_calls
 from infinidev.engine.llm_client import call_llm
 from infinidev.engine.oversized_result import DuplicateCallGuard, handle_oversized_result
 from infinidev.engine.prompt_profile import apply_calibrated_guidance
@@ -136,6 +137,7 @@ def _run_llm_loop(
     exploration_calls = 0
     budget_nudged = False
     stall_nudges = 0
+    last_failure = "No planner response was available."
     duplicate_guard = DuplicateCallGuard()
 
     for _iteration in range(max_iterations):
@@ -167,10 +169,15 @@ def _run_llm_loop(
                 error = _decision_error(recovered, state)
                 if not error:
                     return recovered
+                last_failure = error
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": error})
                 continue
             logger.warning("Stage Planner returned text without a decision")
+            last_failure = (
+                "The provider returned no native tool calls; text recovery found "
+                "no single schema-valid terminal decision."
+            )
             messages.append({"role": "assistant", "content": content})
             messages.append({
                 "role": "user",
@@ -188,7 +195,8 @@ def _run_llm_loop(
                 )
                 return _failure_decision(
                     "Stage Planner stalled without a terminal decision after "
-                    f"{stall_nudges} nudges."
+                    f"{stall_nudges} nudges. Last failure: {last_failure} "
+                    "Recovery attempted: text decision parsing and terminal-tool nudges."
                 )
             continue
 
@@ -202,6 +210,10 @@ def _run_llm_loop(
             call for call in tool_calls if call.function.name in _TERMINALS
         ]
         if terminal_calls and len(tool_calls) != 1:
+            last_failure = (
+                "A terminal decision was combined with other tool calls; "
+                "the turn was rejected."
+            )
             for call in tool_calls:
                 messages.append({
                     "role": "tool",
@@ -220,6 +232,7 @@ def _run_llm_loop(
             )
             if not error and decision is not None:
                 return decision
+            last_failure = error or "Invalid terminal decision."
             for call in tool_calls:
                 messages.append({
                     "role": "tool",
@@ -277,7 +290,9 @@ def _run_llm_loop(
 
     logger.warning("Stage Planner exhausted max_iterations=%d", max_iterations)
     return _failure_decision(
-        "Stage Planner exhausted its iteration budget without a valid decision."
+        "Stage Planner exhausted its iteration budget without a valid decision. "
+        f"Last failure: {last_failure} "
+        "Recovery attempted: terminal schema/evidence validation and decision feedback."
     )
 
 
@@ -341,6 +356,11 @@ def _parse_terminal(name: str, raw_arguments: Any) -> StageDecision | None:
 
 
 def _decision_from_text(content: str) -> StageDecision | None:
+    calls = parse_text_tool_calls(content)
+    if calls:
+        if len(calls) != 1 or calls[0]["name"] not in _TERMINALS:
+            return None
+        return _parse_terminal(calls[0]["name"], calls[0]["arguments"])
     if not content or "{" not in content:
         return None
     obj = _safe_json(content[content.find("{"):content.rfind("}") + 1])
@@ -432,7 +452,12 @@ def _decision_error(
 def _failure_decision(reason: str) -> BlockGoalDecision:
     return BlockGoalDecision(
         reason=reason,
-        missing="A valid Stage Planner decision on a later retry.",
+        missing=(
+            "Retry the task after checking the provider tool-calling response "
+            "and the Stage Planner terminal schema/evidence errors above. "
+            "This is an internal planning failure; no additional user requirement "
+            "was identified."
+        ),
         evidence=[],
     )
 

@@ -252,10 +252,11 @@ def test_max_iterations_guard_still_returns_block_goal_decision(scripted):
     decision = run_stage_planner(_state(), max_iterations=2)
 
     assert isinstance(decision, BlockGoalDecision)
-    assert decision.reason == (
+    assert decision.reason.startswith(
         "Stage Planner exhausted its iteration budget without a valid decision."
     )
-    assert decision.missing == "A valid Stage Planner decision on a later retry."
+    assert "provider tool-calling response" in decision.missing
+    assert "no native tool calls" in decision.reason
     assert decision.evidence == []
     assert len(runner.calls) == 2, (
         "max_iterations=2 must drive exactly two litellm.completion calls before "
@@ -299,11 +300,12 @@ def test_bounded_stall_returns_failure_decision_after_max_stall_nudges(scripted)
     decision = run_stage_planner(_state(), max_iterations=20)
 
     assert isinstance(decision, BlockGoalDecision)
-    assert decision.reason == (
+    assert decision.reason.startswith(
         f"Stage Planner stalled without a terminal decision after "
         f"{_MAX_STALL_NUDGES} nudges."
     )
-    assert decision.missing == "A valid Stage Planner decision on a later retry."
+    assert "provider tool-calling response" in decision.missing
+    assert "no native tool calls" in decision.reason
     assert decision.evidence == []
     assert len(runner.calls) == _MAX_STALL_NUDGES, (
         f"bounded-stall must drive exactly {_MAX_STALL_NUDGES} litellm.completion "
@@ -439,3 +441,54 @@ def test_complete_goal_rejects_latest_stage_with_unfinished_tasks(scripted):
     decision = run_stage_planner(state)
 
     assert isinstance(decision, EmitStageDecision)
+
+
+@pytest.mark.parametrize("content", [
+    '<tool_call><function=block_goal><parameter=reason>Missing target</parameter>'
+    '<parameter=missing>Exact target</parameter></function></tool_call>',
+    '<tool_call>{"function":{"name":"block_goal","arguments":'
+    '{"reason":"Missing target","missing":"Exact target"}}}</tool_call>',
+])
+def test_text_tool_format_recovers_only_validated_terminal(scripted, content):
+    scripted([_response(content=content)])
+
+    decision = run_stage_planner(_state(), max_iterations=1)
+
+    assert isinstance(decision, BlockGoalDecision)
+    assert decision.reason == "Missing target"
+    assert decision.missing == "Exact target"
+
+
+@pytest.mark.parametrize("content", [
+    '<tool_call>{"name":"read_file","arguments":{"file_path":"secret"}}</tool_call>',
+    '<function=block_goal>{"reason":"Missing target"}</function>',
+    '<function=complete_goal>{"evidence":["Unobserved success"]}</function>',
+    '<function=block_goal>{"reason":"Missing target","missing":"Exact target"}</function>'
+    '<function=read_file>{"file_path":"secret"}</function>',
+])
+def test_text_recovery_does_not_execute_exploration_or_accept_invalid_decision(
+    scripted, monkeypatch, content,
+):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Text recovery must never dispatch exploration")
+
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.stage_planner.execute_tool_call", forbidden
+    )
+    scripted([_response(content=content)])
+
+    decision = run_stage_planner(_state(), max_iterations=1)
+
+    assert isinstance(decision, BlockGoalDecision)
+    assert "iteration budget" in decision.reason
+
+
+def test_planner_failure_reports_last_validation_error_without_model_text(scripted):
+    scripted([_response([_call("complete_goal", {"evidence": ["PRIVATE"]})])])
+
+    decision = run_stage_planner(_state(), max_iterations=1)
+
+    assert isinstance(decision, BlockGoalDecision)
+    assert "evidence ledger is empty" in decision.reason
+    assert "PRIVATE" not in decision.reason
+    assert "Retry" in decision.missing
