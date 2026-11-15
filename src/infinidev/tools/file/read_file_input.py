@@ -21,8 +21,9 @@ class ReadFileInput(BaseModel):
     )
     limit: int | None = Field(
         default=None,
+        ge=0,
         description=(
-            "Maximum number of lines to read. "
+            "Maximum number of lines to read; non-negative, zero returns an empty result. "
             "If omitted, reads until the end of the file."
         ),
     )

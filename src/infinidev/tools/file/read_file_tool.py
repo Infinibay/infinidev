@@ -212,6 +212,8 @@ class ReadFileTool(InfinibayBaseTool):
             if offset is None:
                 offset = 1
             limit = max(1, end_line - (offset or 1) + 1)
+        if limit is not None and limit < 0:
+            return self._error("limit must be non-negative; zero returns an empty result")
         file_path = self._resolve_path(os.path.expanduser(file_path))
 
         if self._is_pod_mode():
