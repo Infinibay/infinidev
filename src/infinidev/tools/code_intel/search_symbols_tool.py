@@ -1,5 +1,7 @@
 """Tool: fuzzy search across all symbol names."""
 
+import json
+
 from typing import Type
 from pydantic import BaseModel, Field
 
@@ -49,13 +51,20 @@ class SearchSymbolsTool(InfinibayBaseTool):
         from infinidev.engine.ken_client import get_ken_client
 
         hits = get_ken_client().search_symbols(query, limit=15)
+        response = getattr(hits, "response", {})
+        if response.get("ok") is False:
+            return json.dumps({"error": response.get("error", "Ken search failed"),
+                               "ken_response": response}, ensure_ascii=False)
+        diagnostics = (hits.render_diagnostics()
+                       if hasattr(hits, "render_diagnostics") else "")
         if kind:
             hits = [hit for hit in hits if hit.kind == kind]
         if not hits:
-            return ""
+            return diagnostics
         lines = [hit.render() for hit in hits]
         return (
             f"No exact name match for '{query}'. "
-            f"{len(hits)} semantically related symbol(s):\n" + "\n".join(lines)
+            f"{len(hits)} semantically related symbol(s):\n"
+            + (diagnostics + "\n" if diagnostics else "") + "\n".join(lines)
         )
 

@@ -1,0 +1,407 @@
+{
+  "format": "ken-public-code-search-contract-fixtures/1",
+  "provenance": "Source-derived synthetic final public responses, not wire captures or executed retrieval. Source.py is a self-contained synthetic file; each quoted range and hash matches its bytes. Unknown-extension case is explicitly synthetic.",
+  "source_files": {
+    "source.py": "def retain_measurement(ticket):\n    if ticket is None:\n        return None\n    # already observed\n    cpu = ticket.cpu\n    ticket.retained = True\n    return cpu\n"
+  },
+  "contract_sources": [
+    {
+      "path": "/home/andres/Proyects/ken/src/ken/mcp/server.py",
+      "sha256": "38070ac198844f666d04008982c000b1790d6285eb13d0d74e71fe38ec59e9ad"
+    },
+    {
+      "path": "/home/andres/Proyects/ken/src/ken/retrieval/public.py",
+      "sha256": "aee4a7840a61d83b225b9f0dd0a8fe6882a31088378c4bd33a0fa855b474de98"
+    },
+    {
+      "path": "/home/andres/Proyects/ken/src/ken/retrieval/presentation.py",
+      "sha256": "939b3816f8507f8ab12ea24b852b2b3a5ca80da94c4a76f2e543567b1454ae87"
+    },
+    {
+      "path": "/home/andres/Proyects/ken/src/ken/retrieval/piece_search.py",
+      "sha256": "50a4fbee50d37a7509578dfabdfd62c89385b0e61bcca6eec0d99d48f26eff0d"
+    },
+    {
+      "path": "/home/andres/Proyects/ken/src/ken/retrieval/model.py",
+      "sha256": "2c9b6ed65ad170c3e3637c558424c0da81a83d5146b66bd547bfe11d650bc81f"
+    },
+    {
+      "path": "/home/andres/Proyects/ken/crates/ken-cli/src/tools/find.rs",
+      "sha256": "3e399b553a433a8314373c2719db6d587b0e6eac7003b75645f7eb6c9ce64d2f"
+    },
+    {
+      "path": "/home/andres/Proyects/ken/crates/ken-search/src/public.rs",
+      "sha256": "4e2c29527e6fdf98005eeca8a9273b2f1cd5cd024ab4103a3251ba4ee3d642f7"
+    },
+    {
+      "path": "/home/andres/Proyects/ken/crates/ken-retrieval/src/presentation.rs",
+      "sha256": "054e8ac224bd33e118c49a45b840cc62a6194284c2e8016ddba50b52a24c14fe"
+    }
+  ],
+  "routing_notes": [
+    "Python MCP auto/compact invokes find_best; evidence invokes find; legacy keeps historical shapes.",
+    "Rust CLI/MCP auto invokes SearchApplication.find -> BestSearch; evidence invokes compatibility evidence; legacy invokes compatibility legacy.",
+    "Both source implementations expose final results[].entity, entity_span, evidence, source_hash, stale, truncated. Internal card.excerpts is not the public contract.",
+    "Owner adds language/ranking_score. Final Piece normally has piece_kind and no ranking_score/score/language; module can include module_name (possibly null).",
+    "Native JSON transport may require output_format=json in the Rust facade; Python auto response itself is a dict. Fixture is already decoded data, not an MCP framing test."
+  ],
+  "cases": [
+    {
+      "id": "modern-owner",
+      "route": "evidence",
+      "payload": {
+        "query": "find retained CPU",
+        "results": [
+          {
+            "path": "source.py",
+            "entity": {
+              "kind": "function",
+              "qualname": "retain_measurement",
+              "owner": null,
+              "definition_ordinal": 0
+            },
+            "entity_span": {
+              "start_line": 1,
+              "end_line": 7
+            },
+            "evidence": [
+              {
+                "start_line": 1,
+                "end_line": 7,
+                "content": "def retain_measurement(ticket):\n    if ticket is None:\n        return None\n    # already observed\n    cpu = ticket.cpu\n    ticket.retained = True\n    return cpu"
+              }
+            ],
+            "source_hash": "db16de592c42a1e812dc1a02abaef8fae62a52b7626814c29ffbd795229ee659",
+            "stale": false,
+            "truncated": false,
+            "language": "python",
+            "ranking_score": 0.875
+          }
+        ],
+        "profile_version": "source-derived-offline-fixture",
+        "warnings": [],
+        "truncated": false,
+        "omitted_count": 0
+      },
+      "expected_contract": {
+        "score_field": "ranking_score",
+        "score_kind": "ranking value, not cosine similarity"
+      }
+    },
+    {
+      "id": "modern-piece-symbol",
+      "route": "auto/find_best",
+      "payload": {
+        "query": "find retained CPU",
+        "results": [
+          {
+            "path": "source.py",
+            "entity": {
+              "kind": "function",
+              "qualname": "retain_measurement",
+              "owner": null,
+              "definition_ordinal": 0
+            },
+            "entity_span": {
+              "start_line": 1,
+              "end_line": 7
+            },
+            "evidence": [
+              {
+                "start_line": 1,
+                "end_line": 7,
+                "content": "def retain_measurement(ticket):\n    if ticket is None:\n        return None\n    # already observed\n    cpu = ticket.cpu\n    ticket.retained = True\n    return cpu"
+              }
+            ],
+            "source_hash": "db16de592c42a1e812dc1a02abaef8fae62a52b7626814c29ffbd795229ee659",
+            "stale": false,
+            "truncated": false,
+            "piece_kind": "symbol"
+          }
+        ],
+        "profile_version": "source-derived-offline-fixture",
+        "warnings": [],
+        "truncated": false,
+        "omitted_count": 0
+      },
+      "expected_contract": {
+        "score_field": null,
+        "missing_score_is_not_zero_similarity": true
+      }
+    },
+    {
+      "id": "modern-piece-file-null-qualname",
+      "route": "auto/find_best",
+      "payload": {
+        "query": "find retained CPU",
+        "results": [
+          {
+            "path": "source.py",
+            "entity": {
+              "kind": "file",
+              "qualname": null,
+              "owner": null,
+              "definition_ordinal": 0
+            },
+            "entity_span": {
+              "start_line": 1,
+              "end_line": 7
+            },
+            "evidence": [
+              {
+                "start_line": 1,
+                "end_line": 7,
+                "content": "def retain_measurement(ticket):\n    if ticket is None:\n        return None\n    # already observed\n    cpu = ticket.cpu\n    ticket.retained = True\n    return cpu"
+              }
+            ],
+            "source_hash": "db16de592c42a1e812dc1a02abaef8fae62a52b7626814c29ffbd795229ee659",
+            "stale": false,
+            "truncated": false,
+            "piece_kind": "file"
+          }
+        ],
+        "profile_version": "source-derived-offline-fixture",
+        "warnings": [],
+        "truncated": false,
+        "omitted_count": 0
+      },
+      "expected_contract": {
+        "identity_survives_via_path": true
+      }
+    },
+    {
+      "id": "modern-partial-disjoint",
+      "route": "auto/find_best",
+      "payload": {
+        "query": "find retained CPU",
+        "results": [
+          {
+            "path": "source.py",
+            "entity": {
+              "kind": "function",
+              "qualname": "retain_measurement",
+              "owner": null,
+              "definition_ordinal": 0
+            },
+            "entity_span": {
+              "start_line": 1,
+              "end_line": 7
+            },
+            "evidence": [
+              {
+                "start_line": 1,
+                "end_line": 3,
+                "content": "def retain_measurement(ticket):\n    if ticket is None:\n        return None"
+              },
+              {
+                "start_line": 5,
+                "end_line": 7,
+                "content": "    cpu = ticket.cpu\n    ticket.retained = True\n    return cpu"
+              }
+            ],
+            "source_hash": "db16de592c42a1e812dc1a02abaef8fae62a52b7626814c29ffbd795229ee659",
+            "stale": false,
+            "truncated": true,
+            "piece_kind": "symbol"
+          }
+        ],
+        "profile_version": "source-derived-offline-fixture",
+        "warnings": [
+          "Additional candidates omitted by response budget."
+        ],
+        "truncated": true,
+        "omitted_count": 2
+      },
+      "expected_contract": {
+        "preserve_disjoint_ranges": true,
+        "preserve_partial_flag": true
+      }
+    },
+    {
+      "id": "modern-stale",
+      "route": "auto/find_best",
+      "payload": {
+        "query": "find retained CPU",
+        "results": [
+          {
+            "path": "source.py",
+            "entity": {
+              "kind": "function",
+              "qualname": "retain_measurement",
+              "owner": null,
+              "definition_ordinal": 0
+            },
+            "entity_span": {
+              "start_line": 1,
+              "end_line": 7
+            },
+            "evidence": [],
+            "source_hash": "db16de592c42a1e812dc1a02abaef8fae62a52b7626814c29ffbd795229ee659",
+            "stale": true,
+            "truncated": false,
+            "piece_kind": "symbol"
+          }
+        ],
+        "profile_version": "source-derived-offline-fixture",
+        "warnings": [
+          "source.py: source changed since catalog; reindex before quoting source"
+        ],
+        "truncated": false,
+        "omitted_count": 0
+      },
+      "expected_contract": {
+        "quote_no_code": true,
+        "preserve_stale_flag": true
+      }
+    },
+    {
+      "id": "modern-empty",
+      "route": "auto/find_best",
+      "payload": {
+        "query": "find retained CPU",
+        "results": [],
+        "profile_version": "source-derived-offline-fixture",
+        "warnings": [],
+        "truncated": false,
+        "omitted_count": 0
+      },
+      "expected_contract": {
+        "no_silent_keyword_fallback": true
+      }
+    },
+    {
+      "id": "modern-budget-empty",
+      "route": "auto/find_best",
+      "payload": {
+        "query": "find retained CPU",
+        "results": [],
+        "profile_version": "source-derived-offline-fixture",
+        "warnings": [],
+        "truncated": true,
+        "omitted_count": 1
+      },
+      "expected_contract": {
+        "distinguish_no_matches_from_budget_omission": true,
+        "no_silent_keyword_fallback": true
+      }
+    },
+    {
+      "id": "modern-preparation-required",
+      "route": "auto/find_best",
+      "payload": {
+        "ok": false,
+        "code": "search_preparation_required",
+        "error": "Offline fixture: resources not prepared.",
+        "next_action": "Run ken retrieval prepare --path PROJECT, then retry.",
+        "results": []
+      },
+      "expected_contract": {
+        "preserve_failure_status": true,
+        "no_silent_keyword_fallback": true
+      }
+    },
+    {
+      "id": "evidence-index-required",
+      "route": "evidence",
+      "payload": {
+        "ok": false,
+        "code": "retrieval_index_required",
+        "error": "Offline fixture: source passages absent.",
+        "next_action": "Run ken retrieval index --path PROJECT --profile PROFILE.json, then retry.",
+        "results": []
+      },
+      "expected_contract": {
+        "preserve_failure_status": true
+      }
+    },
+    {
+      "id": "legacy-files",
+      "route": "legacy/files",
+      "payload": [
+        {
+          "path": "source.py",
+          "language": "python",
+          "score": 0.5,
+          "symbols": [
+            {
+              "kind": "function",
+              "name": "retain_measurement",
+              "line": 1
+            }
+          ]
+        }
+      ],
+      "expected_contract": {
+        "cosine_score": 0.5,
+        "legacy_supported": true
+      }
+    },
+    {
+      "id": "legacy-symbols",
+      "route": "legacy/symbols",
+      "payload": [
+        {
+          "qualname": "retain_measurement",
+          "kind": "function",
+          "file": "source.py",
+          "line": 1,
+          "line_end": 7,
+          "docstring": "Retain observed CPU.",
+          "score": 0.5
+        }
+      ],
+      "expected_contract": {
+        "legacy_supported": true
+      }
+    },
+    {
+      "id": "modern-extension-preservation",
+      "route": "synthetic transport extension test",
+      "payload": {
+        "query": "find retained CPU",
+        "results": [
+          {
+            "path": "source.py",
+            "entity": {
+              "kind": "function",
+              "qualname": "retain_measurement",
+              "owner": null,
+              "definition_ordinal": 0
+            },
+            "entity_span": {
+              "start_line": 1,
+              "end_line": 7
+            },
+            "evidence": [
+              {
+                "start_line": 1,
+                "end_line": 7,
+                "content": "def retain_measurement(ticket):\n    if ticket is None:\n        return None\n    # already observed\n    cpu = ticket.cpu\n    ticket.retained = True\n    return cpu"
+              }
+            ],
+            "source_hash": "db16de592c42a1e812dc1a02abaef8fae62a52b7626814c29ffbd795229ee659",
+            "stale": false,
+            "truncated": false,
+            "piece_kind": "symbol",
+            "transport_test_extension": {
+              "nested": [
+                1,
+                2
+              ]
+            }
+          }
+        ],
+        "profile_version": "source-derived-offline-fixture",
+        "warnings": [],
+        "truncated": false,
+        "omitted_count": 0,
+        "transport_test_extension": {
+          "scope": "envelope"
+        }
+      },
+      "expected_contract": {
+        "preserve_nested_extension_separately_at_row_and_envelope": true
+      }
+    }
+  ]
+}

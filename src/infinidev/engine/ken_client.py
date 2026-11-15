@@ -10,18 +10,11 @@ local implementation when the server is missing, the project has no
 ``.ken`` index, or a call times out — callers get slightly worse results,
 never an exception and never an empty list where data exists.
 
-Ken tool surface used here (verified against ken-rank 0.11):
+Code search accepts both legacy flat rows and modern SearchResponse evidence.
+Modern entity identities, disjoint excerpts and source-authority metadata remain
+available to callers, including diagnostics on an empty response. Ken tool names
+and JSON negotiation are owned by this facade; the transport stays generic.
 
-===================  ==========================================================
-``ken_search_files``  ``[{path, language, score, symbols[]}]``
-``ken_search_symbols`` ``[{qualname, kind, file, line, line_end, docstring, score}]``
-``ken_grep``          ``{ok, results: [{path, count, snippets: [{line, text}]}]}``
-``ken_recall``        ``[{topic, content, tags, score, created_at}]``
-``ken_remember``      ``{ok, topic}``
-``ken_rank``          ``{ok, context_block, files, symbols, findings}``
-``ken_callgraph``     ``{callers: [...], callees: [...]}``
-``ken_file_symbols``  ``{path, symbols: [...]}``
-===================  ==========================================================
 """
 
 from __future__ import annotations
@@ -31,7 +24,7 @@ import logging
 import threading
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from infinidev.engine.mcp_client import (
     McpHit,
@@ -54,12 +47,15 @@ class SymbolHit:
     file: str
     line: int = 0
     docstring: str = ""
-    score: float = 0.0
+    score: float | None = 0.0
     source: str = "ken"
+    snippet: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def render(self) -> str:
         doc = f" — {self.docstring}" if self.docstring else ""
-        return f"{self.kind:10} {self.qualname}  {self.file}:{self.line}{doc}"
+        text = f"{self.kind:10} {self.qualname}  {self.file}:{self.line}{doc}"
+        return "\n".join(part for part in (text, self.snippet, _code_metadata(self.metadata)) if part)
 
 
 @dataclass(slots=True)
@@ -98,6 +94,73 @@ class MemoryHit:
             "or its assumptions."
         )
         return "\n".join(lines)
+
+
+SearchHit = TypeVar("SearchHit")
+
+
+class CodeSearchResults(list[SearchHit]):
+    """List-compatible results retaining diagnostics even when no hits exist."""
+
+    def __init__(self, hits: list[SearchHit], *, response: dict[str, Any]) -> None:
+        super().__init__(hits)
+        self.response = deepcopy(response)
+
+    def __getitem__(self, index: Any) -> Any:
+        result = super().__getitem__(index)
+        return type(self)(result, response=self.response) if isinstance(index, slice) else result
+
+    def render_diagnostics(self) -> str:
+        return ("Ken search response: " + json.dumps(self.response, ensure_ascii=False)
+                if self.response else "")
+
+
+@dataclass(slots=True)
+class CodeFileHit(McpHit):
+    """A code match whose score may be absent and whose source status is explicit."""
+
+    score: float | None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def render(self) -> str:
+        return "\n".join(part for part in (
+            f"{self.target}:{self.line}", self.snippet, _code_metadata(self.metadata),
+        ) if part)
+
+
+def _code_evidence(row: dict[str, Any]) -> str:
+    return "\n\n".join(
+        f"{fragment.get('start_line', '?')}-{fragment.get('end_line', '?')}\n"
+        + fragment["content"]
+        for fragment in row.get("evidence", [])
+        if isinstance(fragment, dict) and isinstance(fragment.get("content"), str)
+    )
+
+
+def _code_metadata(metadata: dict[str, Any]) -> str:
+    # Evidence already appears with its disjoint spans in the snippet above.
+    row = metadata.get("result")
+    if not row:
+        return ""
+    return "Ken source metadata: " + json.dumps(
+        {key: value for key, value in row.items() if key != "evidence"}, ensure_ascii=False,
+    )
+
+
+def _code_rows(payload: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if isinstance(payload, list):
+        return _as_rows(payload), {}
+    if isinstance(payload, dict):
+        response = deepcopy({key: value for key, value in payload.items()
+                             if key not in {"results", "hits", "items"}})
+        if payload.get("ok") is False:
+            return [], response
+        if any(payload.get(key) for key in ("path", "qualname", "name")):
+            return [payload], {}
+        if any(isinstance(payload.get(key), list)
+               for key in ("results", "hits", "items", "symbols", "files")):
+            return _as_rows(payload), response
+    return [], {"ok": False, "error": "Unsupported Ken search response"}
 
 
 class KenClient:
@@ -153,55 +216,65 @@ class KenClient:
 
     # ── semantic search ──────────────────────────────────────────────
 
-    def search_files(self, query: str, limit: int = 8) -> list[McpHit]:
-        """Files semantically relevant to *query*, best first."""
-        rows = self._call(
+    def search_files(self, query: str, limit: int = 8) -> CodeSearchResults[McpHit]:
+        """Files in server rank order, with evidence and declared source status."""
+        payload = self._call(
             "ken_find", {"query": query, "scope": "files", "limit": limit},
         )
+        if payload is None:
+            return CodeSearchResults(keyword_search(query, limit, kinds={"files"}), response={
+                "source": "fallback", "reason": "Ken call failed or was unavailable",
+            })
+        rows, response = _code_rows(payload)
         hits: list[McpHit] = []
-        for row in _as_rows(rows):
-            path = str(row.get("path", ""))
+        for row in rows:
+            path = str(row.get("path") or "")
             if not path:
                 continue
-            symbols = row.get("symbols") or []
-            outline = ", ".join(
+            modern = isinstance(row.get("entity"), dict)
+            snippet = _code_evidence(row) if modern else ", ".join(
                 str(symbol.get("name", ""))
-                for symbol in symbols[:6]
-                if isinstance(symbol, dict)
+                for symbol in (row.get("symbols") or [])[:6] if isinstance(symbol, dict)
             )
-            hits.append(
-                McpHit(
-                    target=path,
-                    snippet=outline,
-                    score=float(row.get("score", 0.0) or 0.0),
-                    source="ken",
-                )
-            )
-        if hits:
-            return hits[:limit]
-        return keyword_search(query, limit, kinds={"files"})
+            hits.append(CodeFileHit(
+                target=path, snippet=snippet, source="ken",
+                score=row.get("ranking_score", row.get("score")) if modern
+                else float(row.get("score", 0.0) or 0.0),
+                line=int((row.get("entity_span") or {}).get("start_line", 0)) if modern else 0,
+                metadata={"result": deepcopy(row), "response": deepcopy(response)},
+            ))
+        return CodeSearchResults(hits[:limit], response=response)
 
-    def search_symbols(self, query: str, limit: int = 10) -> list[SymbolHit]:
-        """Symbols (functions, classes, methods) matching *query*."""
-        rows = self._call(
+    def search_symbols(self, query: str, limit: int = 10) -> CodeSearchResults[SymbolHit]:
+        """Symbols or requested pieces, retaining evidence and response diagnostics."""
+        payload = self._call(
             "ken_find", {"query": query, "scope": "symbols", "limit": limit},
         )
+        if payload is None:
+            return CodeSearchResults([], response={
+                "ok": False, "error": "Ken call failed or was unavailable",
+            })
+        rows, response = _code_rows(payload)
         hits: list[SymbolHit] = []
-        for row in _as_rows(rows):
-            qualname = str(row.get("qualname") or row.get("name") or "")
+        for row in rows:
+            modern = isinstance(row.get("entity"), dict)
+            entity = row["entity"] if modern else row
+            path = str(row.get("file") or row.get("path") or "")
+            qualname = str(entity.get("qualname") or entity.get("name") or
+                           (path if modern else ""))
             if not qualname:
                 continue
-            hits.append(
-                SymbolHit(
-                    qualname=qualname,
-                    kind=str(row.get("kind", "symbol")),
-                    file=str(row.get("file") or row.get("path") or ""),
-                    line=int(row.get("line", 0) or 0),
-                    docstring=str(row.get("docstring") or "").strip(),
-                    score=float(row.get("score", 0.0) or 0.0),
-                )
-            )
-        return hits[:limit]
+            hits.append(SymbolHit(
+                qualname=qualname, kind=str(entity.get("kind", "symbol")), file=path,
+                line=int((row.get("entity_span") or {}).get("start_line", 0)) if modern
+                else int(row.get("line", 0) or 0),
+                docstring=str(row.get("docstring") or "").strip(),
+                score=row.get("ranking_score", row.get("score")) if modern
+                else float(row.get("score", 0.0) or 0.0),
+                snippet=_code_evidence(row) if modern else "",
+                metadata={"result": deepcopy(row), "response": deepcopy(response)},
+            ))
+        return CodeSearchResults(hits[:limit], response=response)
 
     def grep(
         self,
