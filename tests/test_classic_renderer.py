@@ -394,3 +394,64 @@ def test_chat_activity_starts_timer_and_fast_result_returns():
 
     assert result is True
     assert status.run_started_at is None
+
+
+@pytest.mark.parametrize("key", ["control_c", "sigint"])
+def test_classic_cancel_key_requests_cooperative_stop_before_worker_returns(monkeypatch, key):
+    from prompt_toolkit import application
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.key_binding.key_processor import KeyPress
+    from prompt_toolkit.keys import Keys
+    from prompt_toolkit.output import DummyOutput
+
+    cancelled = threading.Event()
+    released = threading.Event()
+    cancellations = []
+
+    class Engine:
+        def cancel(self):
+            cancellations.append(key)
+            cancelled.set()
+            released.set()
+
+    original_application = application.Application
+
+    def make_app(**kwargs):
+        app = original_application(**kwargs)
+        original_run = app.run
+
+        def run(*, pre_run):
+            def start():
+                pre_run()
+
+                def send_key():
+                    if key == "sigint":
+                        app.key_processor.send_sigint()
+                    else:
+                        app.key_processor.feed(KeyPress(Keys.ControlC))
+                        app.key_processor.process_keys()
+
+                app.loop.call_soon(send_key)
+                # Release the fake task even if the key is ignored. No OS signal
+                # or provider is involved, and the wrapper must still finish.
+                app.loop.call_later(0.2, released.set)
+
+            return original_run(pre_run=start)
+
+        app.run = run
+        return app
+
+    monkeypatch.setattr(application, "Application", make_app)
+
+    def task():
+        released.wait(timeout=2)
+        return cancelled.is_set()
+
+    status = cr.SessionStatus()
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        result = cr.run_with_live_status(Engine(), task, status)
+
+    assert result is True
+    assert cancellations == [key]
+    assert status.run_started_at is None

@@ -641,7 +641,7 @@ def run_with_live_status(
     - Worker thread executes ``task_callable``; the engine's events
       print *above* the app via ``print()`` + ``patch_stdout``.
     - One-line "working …" indicator + bottom toolbar stay anchored.
-    - Ctrl+C: first press calls ``engine.cancel()`` cooperatively;
+    - Ctrl+C or SIGINT: first request calls ``engine.cancel()`` cooperatively;
       a second press within 1.5s aborts the app with ``KeyboardInterrupt``.
     - When the worker finishes (success, failure, or cancellation),
       the app is closed from the worker thread via
@@ -677,6 +677,7 @@ def run_with_live_status(
     kb = KeyBindings()
 
     @kb.add("c-c")
+    @kb.add("<sigint>")
     def _(event):
         now = time.monotonic()
         if now - cancel_state["last_press"] < 1.5 and cancel_state["presses"] >= 1:
