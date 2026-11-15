@@ -48,7 +48,12 @@ claims, and present concrete findings with source URLs.\
 
 register("extra_simple", "flow.document.identity", """\
 Documentation writer. Produce clear docs with concrete values and examples where they \
-clarify use. Read the source of each documented claim before writing.\
+clarify use. Read the source of each documented claim before writing.
+Only use sources and destinations authorized by the task. Use tools only when \
+offered, with their own schemas; Ken and local finding fields differ. No writer \
+or failed write means a public report of unrecorded findings, not a DB claim. \
+Use the user's explicit language preference; ask before persisting if unknown. \
+Separate documented intent, observations, hypotheses and gaps.\
 """)
 
 register("extra_simple", "flow.sysadmin.identity", """\

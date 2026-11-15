@@ -1,93 +1,124 @@
-"""Prompt for the /init command — project exploration and documentation."""
+"""Capability-aware prompts for bounded, read-only project exploration."""
 
-INIT_TASK_DESCRIPTION = """\
+from __future__ import annotations
+
+import json
+from collections.abc import Collection
+
+_DESCRIPTION = """\
 ## Task: Explore and Document This Project
 
-You are initializing the knowledge base for this project. Explore the codebase
-thoroughly and record everything a developer would need to know to start
-working on it.
+Produce a useful first slice of project knowledge, starting with existing README,
+docs, ADRs and CONTEXT files. Follow an important entry point through its callers,
+implementation and tests that exercise that path. Prefer a coherent explanation over an inventory
+of every file or symbol. State which areas remain unexplored.
 
-## What to Explore
+## Scope and Evidence
 
-1. **Project root** — Read README, CHANGELOG, LICENSE, config files
-   (package.json, pyproject.toml, Cargo.toml, Makefile, docker-compose.yml,
-   etc.). Understand what this project IS.
-2. **Directory structure** — Use list_directory on the root and key
-   subdirectories. Understand how the project is organized.
-3. **Entry points** — Find the main entry point(s): main(), app.run(),
-   CLI commands, HTTP server setup, etc.
-4. **Core modules** — Read the most important source files. Understand the
-   core abstractions, classes, and how they connect.
-5. **Dependencies** — Check the dependency file (requirements.txt,
-   package.json, Cargo.toml, go.mod). Note key libraries and their purpose.
-6. **Tests** — Check if tests exist, what framework is used, how to run them.
-7. **Build/run commands** — How to install, build, run, and test the project.
-8. **Configuration** — Environment variables, config files, settings.
+Adapt exploration to this project: purpose, intended users and use cases; domain
+concepts, rules and invariants; architecture and integrations; data and lifecycle;
+security controls and trust boundaries; configuration, build, tests, deployment
+and design decisions. A category without evidence stays unknown or unexplored;
+do not invent business features to fill headings.
 
-## How to Document — Standard Format
+Distinguish documented intent, facts observed in source, hypothesis and unknowns.
+Cite the paths and qualified symbols supporting each conclusion. Reading source or a test does not
+establish runtime correctness or certify security. Record contradictory evidence
+and assumptions rather than silently choosing one account. Do not require a
+numeric confidence of 1.0 merely because you read code.
 
-ALL documentation goes to the DATABASE, not to files. Do NOT create, write, or
-modify any files. Use these tools:
+Explore without creating or modifying project files, running build/test commands,
+indexing or downloading external documentation. Those effects require separate
+explicit authorization. Do not read credential files or store secrets, private
+reasoning, transcripts, book extracts or local-library contents.
 
-- **Ken finding tools** — For each piece of project knowledge (structure,
-  classes, patterns, config, etc.). Use finding_type="project_context",
-  confidence=1.0.
-- **update_documentation** — If you find key external libraries, fetch their
-  docs and store them in the library_docs table for future reference.
+## Finding Storage
 
-### Finding type: `project_context` (for all structural knowledge)
+{storage}
 
-Use these EXACT topic prefixes so findings are searchable and consistent:
+The final offered schema is authoritative: the initial toolbox can change during
+routing or discovery. Never call a tool absent from that schema or guess its
+arguments. If the selected storage tool is unavailable, denied or fails, report
+unrecorded findings publicly; do not silently switch backends or claim persistence.
+Keep one small conclusion per finding and reuse existing identity when supported.
+A storage acknowledgement means saved, not reviewed, true or currently valid.
+Do not invent hashes, validity checks or revision history the backend does not
+provide. Preserve existing evidence when updating; report conflicts explicitly.
 
-| Topic prefix | What to document | Example |
-|---|---|---|
-| `[project] Overview` | What the project does, its purpose, tech stack | "FastAPI web app for inventory management, Python 3.11, PostgreSQL" |
-| `[project] Structure` | Directory layout and what each dir contains | "src/ = app code, tests/ = pytest tests, migrations/ = alembic" |
-| `[project] Entry points` | How the app starts, main files | "Entry: src/main.py:main(), CLI via click, runs uvicorn server" |
-| `[project] Build & run` | Install, build, test, deploy commands | "Install: pip install -e ., Run: uvicorn src.main:app, Test: pytest" |
-| `[project] Config` | Environment vars, config files, settings | "DB_URL in .env, settings in src/config.py via pydantic-settings" |
-| `[project] Dependencies` | Key libraries and why they're used | "SQLAlchemy for ORM, Pydantic for validation, httpx for HTTP client" |
-| `[class] ClassName` | Purpose, key methods, file location | "UserService in src/services/user.py — handles registration, auth, profile CRUD" |
-| `[module] module_name` | What the module does, key exports | "src/auth/ — JWT token generation, middleware, permission decorators" |
-| `[pattern] Pattern name` | Design patterns and conventions used | "Repository pattern: all DB access through src/repositories/, never direct queries" |
-| `[api] Endpoint group` | API routes, request/response format | "POST /auth/login — takes {email, password}, returns {token, refresh_token}" |
-| `[test] Testing setup` | Test framework, how to run, conventions | "pytest + pytest-asyncio, fixtures in conftest.py, DB reset per test" |
+## Language and Delivery
 
-### Rules for content quality
+{language}
 
-- **Be specific.** File paths, line numbers, function signatures, actual values.
-- **Be complete.** Each finding stands on its own — useful without
-  needing to read other findings.
-- **Set confidence to 1.0** — you are reading the actual code, not guessing.
-- **Tag findings** with the concrete subsystem, symbol, and behavior names a
-  later search will use.
-- **One finding per concept.** Do not cram everything into one giant finding.
-  Separate structure from classes from patterns.
+Keep paths, identifiers and commands unchanged. Write concise, original findings;
+no books or PDFs are needed. Do not depend on add_note, documentation download or
+any other tool that is not actually offered. Use available read/search tools within
+their schemas and keep the exploration bounded by relevance.
 
-## Workflow
-
-1. Start with list_directory on the project root
-2. Read the main config file (pyproject.toml, package.json, etc.)
-3. Read the README if it exists
-4. Explore the source directory structure
-5. Read key source files (entry points, core modules)
-6. Record Ken findings as you go — do not wait until the end
-7. After exploring, review your notes and add any missing context
-
-## Important
-
-- Do NOT create, write, or modify any files. This is read-only exploration.
-  ALL output goes to the database via Ken's finding tools and update_documentation.
-- Do NOT skip recording findings. Every important discovery must be recorded.
-- Use add_note to track what you've already explored so you don't repeat yourself.
-- If the project is large, focus on the most important parts first (entry points,
-  core logic, public API) and note what remains to be explored.
-- For key external dependencies (frameworks, libraries), use update_documentation
-  to fetch and store their documentation for future developer reference.
+Deliver a self-contained public summary: what was inspected, useful conclusions
+with source references, what storage actually acknowledged, unrecorded findings,
+contradictions and the next useful slice. Never claim exhaustive documentation,
+durable exploration checkpoints or complete coverage from this task alone.
 """
 
-INIT_EXPECTED_OUTPUT = (
-    "Comprehensive project documentation recorded to the knowledge base. "
-    "Report a summary of what was documented and any areas that need "
-    "further exploration."
+_EXPECTED = (
+    "A self-contained project exploration summary in the user's language, with "
+    "source references, facts distinguished from hypotheses, acknowledged storage "
+    "separated from unrecorded findings, and explicit gaps and next steps."
 )
+
+
+def build_init_task_prompt(
+    *,
+    tool_names: Collection[str] | None = None,
+    language: str | None = None,
+) -> tuple[str, str]:
+    """Compose guidance from the initial toolbox, without discovering tools.
+
+    Names select schema-specific advice only; the model must still check the
+    final offered schema. None preserves capability-neutral legacy constants.
+    """
+    if tool_names is None:
+        storage = (
+            "Check the offered finding-storage schemas first. If ken_remember is "
+            "offered, use its own schema; otherwise use record_finding only if "
+            "offered, with its local schema. Select one backend and do not mix "
+            "their arguments. If neither is offered, deliver findings publicly "
+            "and do not claim database persistence."
+        )
+    elif "ken_remember" in tool_names:
+        storage = (
+            "Use ken_remember only if it remains offered, following its own "
+            "offered schema for topic, content and justification when supported. Local finding_type "
+            "and confidence arguments do not belong to this backend."
+        )
+    elif "record_finding" in tool_names:
+        storage = (
+            'Use record_finding only if it remains offered. Its local schema has '
+            'finding_type="project_context" for project context; use hypothesis '
+            'for conjectures and do not force certainty. New findings are '
+            'provisional. Include source references using the offered schema.'
+        )
+    else:
+        storage = (
+            "No finding storage tool is offered in the initial toolbox. Deliver "
+            "findings in the public summary. Do not claim database persistence."
+        )
+    if language and language.strip():
+        language_guidance = (
+            "Requested output language (JSON string): "
+            + json.dumps(language.strip(), ensure_ascii=False)
+            + ". Use this language for findings and the public report."
+        )
+    else:
+        language_guidance = (
+            "Use the user's explicit language preference from the conversation "
+            "for findings and the public report, not the language of this prompt "
+            "or the source code. If no preference is available, ask before "
+            "persisting language-dependent findings; report that choice as "
+            "pending if interaction is unavailable."
+        )
+    return _DESCRIPTION.format(storage=storage, language=language_guidance), _EXPECTED
+
+
+# Compatibility for hosts that import the original constant tuple components.
+INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT = build_init_task_prompt()

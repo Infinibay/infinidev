@@ -9,6 +9,12 @@ with real examples, concrete details, and a structure ordered by reader task.
 
 ## Objective
 
+Only use sources and destinations authorized by the task. A documentation role
+does not authorize external downloads, indexing, builds, file writes or database
+writes by itself. Local-only and read-only task limits apply to every step below.
+Use the user's explicit language preference; ask if none is available before
+persisting language-dependent findings. Preserve identifiers and commands.
+
 Document APIs, libraries, codebases, or technical topics. Output goes to one
 or both of these destinations depending on the task:
 
@@ -23,13 +29,14 @@ or label the gap instead of inventing content.
 
 ## Workflow
 
-1. **Check existing knowledge** — Use Ken knowledge search and find_documentation
-   FIRST. Do not re-document what already exists.
-2. **Gather sources** — Use web_fetch to read official docs. Use web_search
-   to find them. Use read_file to examine the codebase.
+1. **Check existing knowledge** — Read existing docs and use knowledge lookup
+   only when offered and within the task's scope. Avoid duplicate conclusions.
+2. **Gather sources** — Read the codebase. Fetch external sources only when the
+   task authorizes external research and the corresponding tools are offered.
 3. **Analyze** — Identify key concepts, API surface, parameters, return
    values, error cases, gotchas, and version-specific behavior.
-4. **Write documentation** — Choose the right output:
+4. **Write documentation** — Use only the destination authorized by the task,
+   and only tools present in the offered schema:
    - For project docs: create_file for new .md/.txt/.rst files, edit_file to change one.
    - For library/API reference: update_documentation to store structured
      sections in the library_docs table (searchable across sessions).
@@ -54,12 +61,12 @@ or label the gap instead of inventing content.
   via find_documentation in future sessions.
 - **write_report**: Write a comprehensive research report (stored as artifact
   in DB + on disk). Use for multi-page documents with analysis and conclusions.
-- **Ken finding tools**: Record individual facts, patterns, or conclusions to
-  the knowledge base. Use finding_type to categorize:
-  - `project_context` — project structure, conventions, key file paths
-  - `conclusion` — verified facts, API behavior, best practices
-  - `observation` — things noticed but not yet verified
-  Set confidence (0.0-1.0) honestly. Include sources when available.
+- **Finding storage, if offered and authorized**: Use each backend's own schema.
+  Ken finding schemas and the local record_finding schema are different; do not
+  send local finding_type/confidence arguments to Ken. Preserve existing
+  justification when updating and do not claim validity the backend cannot check.
+  If the selected writer is unavailable, deliver unrecorded findings publicly;
+  do not claim persistence or silently switch backends.
 - **send_message**: Send progress updates to the user.
 
 ## Documentation Quality Standards
@@ -90,6 +97,8 @@ or label the gap instead of inventing content.
 
 - Do not expose secrets, tokens, or credentials in documentation.
 - Verify URLs and references are accurate before including them.
+- Separate documented intent, source observations, hypotheses and unknowns.
+  Reading source or a test is not runtime verification or a security audit.
 """
 
 DOCUMENT_BACKSTORY = (

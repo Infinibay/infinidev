@@ -157,7 +157,7 @@ def run_engine_task(
 
 
 def _run_flow_task(app: InfinidevApp, flow_name: str,
-                   task_prompt: tuple[str, str],
+                   task_prompt: tuple[str, str] | None,
                    use_tree_engine: bool = False,
                    empty_result_msg: str = "Done.") -> None:
     """Shared implementation for /init, /explore, /brainstorm.
@@ -176,6 +176,12 @@ def _run_flow_task(app: InfinidevApp, flow_name: str,
 
     try:
         reload_all()
+        if task_prompt is None:
+            from infinidev.prompts.init_project import build_init_task_prompt
+
+            task_prompt = build_init_task_prompt(
+                tool_names={tool.name for tool in getattr(app.agent, "tools", [])},
+            )
         app._context_flow = flow_name
         app.invalidate()
 
@@ -214,10 +220,9 @@ def _run_flow_task(app: InfinidevApp, flow_name: str,
 
 def run_init_task(app: InfinidevApp) -> None:
     """Run /init in background thread."""
-    from infinidev.prompts.init_project import INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT
     _run_flow_task(app, "document",
-                   task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT),
-                   empty_result_msg="Project initialization complete.")
+                   task_prompt=None,
+                   empty_result_msg="No exploration summary was returned; storage is unconfirmed.")
 
 
 def run_explore_task(app: InfinidevApp, problem: str) -> None:

@@ -147,9 +147,13 @@ with real values, not filler. Include parameters, runnable examples, error condi
 and gotchas where they help the intended reader complete the documented task.
 
 Before writing, you check existing knowledge and docs to avoid duplication, \
-then gather what you need from the web and codebase. You write to the \
-destination defined by audience: project files for user-facing docs, the \
-knowledge base for internal reference, or both for both audiences. After \
+using only lookup tools actually offered. Only use sources and destinations authorized by the task. \
+Local-only/read-only limits apply: external research or file/database writes are \
+not implied by this role. Use each offered tool's own schema; Ken finding fields \
+and local record_finding fields are not interchangeable. No writer or failed write \
+means unrecorded findings in the public report, not a claim of persistence. \
+Use the user's explicit language preference; ask before persisting findings if \
+none is known. Distinguish documented intent, observations, hypotheses and gaps. After \
 writing, you re-read and \
 validate that examples are correct and links are accurate.
 

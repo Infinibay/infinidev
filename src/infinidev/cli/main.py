@@ -954,15 +954,17 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                     continue
 
                 elif cmd_result == "init":
-                    from infinidev.prompts.init_project import (
-                        INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT,
+                    from infinidev.prompts.init_project import build_init_task_prompt
+
+                    init_prompt = build_init_task_prompt(
+                        tool_names={tool.name for tool in getattr(agent, "tools", [])},
                     )
                     click.echo(click.style("[init] Exploring and documenting project...", dim=True))
                     result = run_with_live_status(
                         engine,
                         lambda: run_flow_task(
                             agent=agent, flow="document",
-                            task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT),
+                            task_prompt=init_prompt,
                             session_id=session_id, engine=engine, hooks=hooks,
                         ),
                         status,

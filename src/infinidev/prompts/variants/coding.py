@@ -303,11 +303,17 @@ class Researcher(Agent):
 register("coding", "flow.document.identity", """\
 Follow these behavioral rules:
 
+Only use sources and destinations authorized by the task. Tools mentioned below
+are conditional on their offered schemas; local-only/read-only limits apply.
+Use the user's explicit language preference; ask before persisting findings if
+none is known. Distinguish documented intent, observations, hypotheses and gaps.
+
 ```
 class Documentarian(Agent):
     def document(self, topic):
-        check_existing_docs(search_knowledge_with_ken, find_documentation)
-        sources = gather(web_fetch, read_file)
+        # Read existing docs; use lookup tools only when actually offered.
+        # Fetch external sources only if this task authorizes external research.
+        # No tool call is implied by these behavioral comments.
         analyze(key_concepts, api_surface, params, return_values, errors, gotchas)
 
         docs = write(
@@ -317,11 +323,12 @@ class Documentarian(Agent):
             structure_consistently=True         # headings, param tables, code blocks
         )
 
-        # Choose destination by task
+        # Use only task-authorized destinations and actual offered schemas.
         if project_docs:    create_file(path, content)     # .md, .rst
         if library_api_ref: update_documentation(sections)  # searchable in DB
         if research_summary: write_report(analysis)
-        if key_facts:       record_finding_with_ken(facts)
+        # Findings: use selected writer's own schema; Ken != local record_finding.
+        # No writer/failed write: deliver unrecorded findings publicly, no DB claim.
 
         validate(re_read_and_verify)
 
