@@ -40,6 +40,7 @@ from typing import Any
 
 import numpy as np
 
+from infinidev.engine import archive_output as archive_codec
 from infinidev.tools.base.db import execute_with_retry
 
 logger = logging.getLogger(__name__)
@@ -380,8 +381,15 @@ class MemoryRecord:
         body = self.content
         if len(body) > max_chars:
             body = body[:max_chars] + f"\n…[{len(self.content) - max_chars} more chars]"
+        reference = ""
+        try:
+            archive_codec.parse_reference(f"wm-record:{self.id}")
+            reference = f"reference=wm-record:{self.id} "
+        except archive_codec.ArchiveError:
+            pass
         provenance = (
             f"source=working-memory record={self.id} session={self.session_id} "
+            f"{reference}"
             f"step={self.step_index} kind={self.kind} "
             f"created={self.created_at or 'unknown'} authority=advisory"
         )
@@ -478,6 +486,122 @@ class WorkingMemory:
             self._ready = False
 
     # ── archiving ────────────────────────────────────────────────────
+
+    def archive_output(self, title: str, text: str, *, step_index: int = 0) -> str | None:
+        """Commit chunks and an immutable manifest before publishing a reference."""
+        if not self._ready:
+            return None
+        try:
+            chunks = archive_codec.split_output(text)
+            reference = "wm-archive:" + uuid.uuid4().hex
+            created = _now()
+            def store(conn):
+                if conn.in_transaction:
+                    raise archive_codec.ArchiveError("unavailable")
+                added = []
+                with conn:
+                    conn.execute("BEGIN")
+                    exists = conn.execute(
+                        "SELECT 1 FROM working_memory WHERE session_id=? AND kind=? AND title=?",
+                        (self.session_id, archive_codec.MANIFEST_KIND, reference)).fetchone()
+                    if exists:
+                        raise archive_codec.ArchiveError("unavailable")
+                    parts, offset = [], 0
+                    for index, chunk in enumerate(chunks):
+                        digest = archive_codec.digest(chunk)
+                        row = conn.execute(
+                            "SELECT id,content FROM working_memory WHERE session_id=? "
+                            "AND content_hash=?", (self.session_id, digest)).fetchone()
+                        if row:
+                            if row[1] != chunk:
+                                raise archive_codec.ArchiveError("incomplete")
+                            record_id = row[0]
+                        else:
+                            record_id = str(uuid.uuid4())
+                            part_title = (title[:180] + f" part {index + 1}")[:200]
+                            conn.execute(
+                                "INSERT INTO working_memory (id,session_id,step_index,kind,title,"
+                                "content,content_hash,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                                (record_id, self.session_id, step_index, "tool_output", part_title,
+                                 chunk, digest, created))
+                            added.append(MemoryRecord(id=record_id, session_id=self.session_id,
+                                step_index=step_index, kind="tool_output", title=part_title,
+                                content=chunk, created_at=created))
+                        parts.append({"index": index, "record_id": record_id, "start": offset,
+                                      "length": len(chunk), "sha256": digest})
+                        offset += len(chunk)
+                    body = archive_codec.make_manifest(reference, self.session_id, title, text, parts)
+                    archive_codec.decode_manifest(body, archive_codec.digest(body),
+                                                   reference, self.session_id)
+                    conn.execute(
+                        "INSERT INTO working_memory (id,session_id,step_index,kind,title,content,"
+                        "content_hash,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                        (str(uuid.uuid4()), self.session_id, step_index, archive_codec.MANIFEST_KIND,
+                         reference, body, archive_codec.digest(body), created))
+                return added
+            with self._store_lock:
+                added = execute_with_retry(store, db_path=self._db_path)
+                self._seen_hashes.update(archive_codec.digest(record.content) for record in added)
+            if self._embed_enabled:
+                for record in added:
+                    self._enqueue_embed(record)
+            return reference
+        except (sqlite3.Error, ValueError):
+            logger.warning("Exact output archival unavailable; no complete reference published")
+            return None
+
+    def read_archive(self, reference: str, *, start: int = 0, length: int = 1500) -> str:
+        """Read an exact session-scoped page from one verified database snapshot."""
+        try:
+            scope, identifier = archive_codec.parse_reference(reference)
+        except archive_codec.ArchiveError:
+            return archive_codec.failure(None, "invalid_reference")
+        try:
+            archive_codec.validate_range(start, length)
+            if not self._ready:
+                raise archive_codec.ArchiveError("unavailable")
+            def load(conn):
+                conn.execute("SAVEPOINT exact_archive_read")
+                try:
+                    if scope == "memory_record":
+                        row = conn.execute("SELECT CASE WHEN length(CAST(content AS BLOB))<=? "
+                            "THEN content END,content_hash FROM working_memory "
+                            "WHERE session_id=? AND id=?",
+                            (4 * archive_codec.CHUNK_CHARACTERS, self.session_id, identifier)).fetchone()
+                        if row is None:
+                            raise archive_codec.ArchiveError("not_found")
+                        return archive_codec.verify_record(row[0], row[1])
+                    manifests = conn.execute(
+                        "SELECT CASE WHEN length(CAST(content AS BLOB))<=? THEN content END,"
+                        "content_hash FROM working_memory "
+                        "WHERE session_id=? AND kind=? AND title=? LIMIT 2",
+                        (archive_codec.MAX_MANIFEST_BYTES, self.session_id,
+                         archive_codec.MANIFEST_KIND, reference)).fetchall()
+                    if not manifests:
+                        raise archive_codec.ArchiveError("not_found")
+                    if len(manifests) != 1:
+                        raise archive_codec.ArchiveError("incomplete")
+                    data = archive_codec.decode_manifest(*manifests[0], reference, self.session_id)
+                    rows = {}
+                    for part in data["parts"]:
+                        record_id = part["record_id"]
+                        if record_id not in rows:
+                            row = conn.execute("SELECT CASE WHEN length(CAST(content AS BLOB))<=? "
+                                "THEN content END,content_hash FROM working_memory "
+                                "WHERE session_id=? AND id=?",
+                                (4 * archive_codec.CHUNK_CHARACTERS,
+                                 self.session_id, record_id)).fetchone()
+                            if row is not None:
+                                rows[record_id] = (row[0], row[1])
+                    return archive_codec.reconstruct(data, rows)
+                finally:
+                    conn.execute("RELEASE exact_archive_read")
+            text = execute_with_retry(load, db_path=self._db_path)
+            return archive_codec.page(reference, scope, text, start, length)
+        except archive_codec.ArchiveError as error:
+            return archive_codec.failure(reference, str(error))
+        except (sqlite3.Error, UnicodeError):
+            return archive_codec.failure(reference, "unavailable")
 
     def archive_step(
         self,
@@ -934,9 +1058,10 @@ class WorkingMemory:
         if not self._ready or not query.strip() or limit <= 0:
             return []
         def _exact(conn):
-            where = 'title = ?' if all_sessions else 'title = ? AND session_id = ?'
-            params = (query.strip(), limit) if all_sessions else (
-                query.strip(), self.session_id, limit)
+            where = 'title = ? AND kind != ?' if all_sessions else (
+                'title = ? AND kind != ? AND session_id = ?')
+            params = (query.strip(), archive_codec.MANIFEST_KIND, limit) if all_sessions else (
+                query.strip(), archive_codec.MANIFEST_KIND, self.session_id, limit)
             return conn.execute(
                 "SELECT id, session_id, step_index, kind, title, content,"
                 " embedding, embedding_space, created_at FROM working_memory WHERE " + where
@@ -971,7 +1096,7 @@ class WorkingMemory:
             where = '1 = 1' if all_sessions else 'session_id = ?'
             params = () if all_sessions else (self.session_id,)
             if not include_traces:
-                where += " AND kind != 'runtime_trace'"
+                where += " AND kind NOT IN ('runtime_trace','tool_archive_manifest')"
             return conn.execute(
                 "SELECT id, session_id, step_index, kind, title, content,"
                 " embedding, embedding_space, created_at FROM working_memory"

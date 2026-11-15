@@ -10,13 +10,13 @@ from __future__ import annotations
 
 from typing import Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 
 
 class RecallContextInput(BaseModel):
-    query: str = Field(
+    query: str = Field(default="",
         description=(
             "What you are trying to remember, e.g. 'the error from the failing "
             "auth test' or 'the list of files in the migrations folder'."
@@ -27,6 +27,20 @@ class RecallContextInput(BaseModel):
         default=False,
         description="Search earlier sessions too, not just the current task.",
     )
+    reference: str | None = Field(default=None, strict=True,
+        description="Exact wm-archive or wm-record reference in the current session; no search.")
+    start: int = Field(default=0, ge=0, strict=True,
+        description="Zero-based Unicode code point offset for exact retrieval.")
+    length: int = Field(default=1500, ge=0, le=8000, strict=True,
+        description="Maximum code points for this page; zero requests metadata, EOF is explicit.")
+
+    @model_validator(mode="after")
+    def _exclusive_reference(self):
+        if self.reference is None and "query" not in self.model_fields_set:
+            raise ValueError("provide query or an exact reference")
+        if self.reference is not None and (self.query.strip() or self.all_sessions):
+            raise ValueError("reference mode cannot be combined with query or all_sessions")
+        return self
 
 
 class RecallContextTool(InfinibayBaseTool):
@@ -36,19 +50,26 @@ class RecallContextTool(InfinibayBaseTool):
     name: str = "recall_context"
     description: str = (
         "Retrieve earlier tool output that has scrolled out of your context. "
-        "Everything you saw in previous steps is archived and searchable — "
+        "Earlier output may be archived and searchable — "
         "use this instead of re-running a read or a command you already did."
+        " Use reference with start/length for exact historical pages; query returns excerpts."
     )
     args_schema: Type[BaseModel] = RecallContextInput
 
     def _run(
-        self, query: str, limit: int = 3, all_sessions: bool = False
+        self, query: str = "", limit: int = 3, all_sessions: bool = False,
+        reference: str | None = None, start: int = 0, length: int = 1500,
     ) -> str:
         from infinidev.engine.working_memory import get_working_memory
         from infinidev.tools.base.context import get_current_session_id
 
-        limit = max(1, min(8, int(limit or 3)))
         memory = get_working_memory(self.session_id or get_current_session_id())
+        if reference is not None:
+            if query.strip() or all_sessions:
+                from infinidev.engine.archive_output import failure
+                return failure(None, "invalid_request")
+            return memory.read_archive(reference, start=start, length=length)
+        limit = max(1, min(8, int(limit or 3)))
         records = memory.search(query, limit=limit, all_sessions=all_sessions)
         if not records:
             scope = "any session" if all_sessions else "this task"

@@ -638,7 +638,12 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                             tracker, agent.project_id, agent.agent_id, engine._hooks)
                     finally:
                         engine._finish_tool_batch()
-                    reference = _archive(ctx, iterations, call.function.name, args, body)
+                    # Exact pages already identify their durable source. Re-archiving and
+                    # appending a footer would invalidate the complete JSON response/budget.
+                    exact_recall = (call.function.name == 'recall_context'
+                                    and args.get('reference') is not None)
+                    reference = '' if exact_recall else _archive(
+                        ctx, iterations, call.function.name, args, body)
                     if reference:
                         references.append(reference)
                         references[:] = references[-40:]
@@ -677,6 +682,12 @@ def _archive(ctx: Any, iteration: int, name: str, args: dict[str, Any], body: st
         memory = get_working_memory(ctx.session_id)
         titles = []
         archive_id = uuid.uuid4().hex
+        if kind == 'tool_output' and name in getattr(ctx, 'tool_dispatch', {}):
+            reference = memory.archive_output(
+                f'turn {archive_id} result {iteration}/{ctx.state.total_tool_calls} {name}',
+                body, step_index=iteration)
+            if reference:
+                return '[Archived evidence; recall_context reference: ' + reference + ']'
         for offset in range(0, len(body), MAX_ARCHIVE_CHARS):
             title = (f'turn {archive_id} result {iteration}/{ctx.state.total_tool_calls} '
                      f'{name} part {offset // MAX_ARCHIVE_CHARS + 1}')
