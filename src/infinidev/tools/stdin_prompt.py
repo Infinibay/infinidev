@@ -72,7 +72,9 @@ def request_stdin_input(
     if handler is None:
         return None
     try:
-        return handler(command, prompt_text, stdout_so_far, stderr_so_far)
+        from infinidev.engine.session_status import awaiting_input
+        with awaiting_input():
+            return handler(command, prompt_text, stdout_so_far, stderr_so_far)
     except Exception as exc:
         logger.error("stdin handler failed: %s — killing for safety", exc)
         return None

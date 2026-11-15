@@ -33,6 +33,7 @@ import os
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from infinidev.engine._best_effort import best_effort
+from infinidev.engine.session_status import current_observer, observed_principal
 from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 logger = logging.getLogger(__name__)
@@ -1115,6 +1116,7 @@ def run_task(
             session_id=session_id, turn_context=turn_context,
             attachments=attachments, hooks=hooks, runtime=runtime,
             repository_path=target_repository,
+            workspace_path=agent_workspace,
             prompt_configuration=prompt_configuration, skip_instruction=_hook_reentry,
         )
 
@@ -1506,11 +1508,13 @@ def run_task(
     return result
 
 
+@observed_principal
 def _run_principal_turn(
     *, agent: Any, engine: Any, user_input: str, session_id: str,
     turn_context: str, attachments: list[Any] | None, hooks: OrchestrationHooks,
     runtime: Any, repository_path: str | None,
     prompt_configuration: EffectivePromptConfiguration, skip_instruction: bool,
+    workspace_path: str | None = None,
 ) -> str:
     """Close a conversational turn without creating or advancing work Tasks."""
     from infinidev.config.settings import settings
@@ -1524,9 +1528,10 @@ def _run_principal_turn(
     status = "failed"
     reply_marked = False
     history_initialized = False
+    final_message_hash = None
 
     def publish(message: str, *, final: bool = False) -> None:
-        nonlocal reply_marked, history_initialized
+        nonlocal reply_marked, history_initialized, final_message_hash
         from infinidev.config.secrets import redact
         from infinidev.db.service import (
             execute_with_retry, register_session, store_conversation_turn, store_session_message,
@@ -1556,6 +1561,13 @@ def _run_principal_turn(
             if callable(mark_shown):
                 mark_shown()
             reply_marked = True
+        if final and current_observer() is not None:
+            import hashlib
+            try:
+                final_message_hash = hashlib.sha256(message.encode()).hexdigest()
+            except UnicodeError:
+                # Observation must not turn an already emitted response into a failure.
+                final_message_hash = None
 
     hooks.on_phase("execute")
     agent.activate_context(session_id=session_id)
@@ -1653,6 +1665,9 @@ def _run_principal_turn(
                         f"Conversation status: {status}.")
     _report_turn_end_to_ken(result, session_id)
     hooks.on_phase("idle")
+    observer = current_observer()
+    if observer is not None and final_message_hash is not None:
+        observer.finish(status, final_message_hash)
     return result
 
 

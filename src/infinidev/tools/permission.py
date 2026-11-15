@@ -176,7 +176,9 @@ def request_permission(tool_name: str, description: str, details: str = "") -> b
         return True
 
     try:
-        return handler(tool_name, description, details)
+        from infinidev.engine.session_status import awaiting_input
+        with awaiting_input():
+            return handler(tool_name, description, details)
     except Exception as e:
         logger.error("Permission handler failed: %s — denying for safety", e)
         return False

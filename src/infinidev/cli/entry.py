@@ -2,7 +2,8 @@
 
 Routes ``infinidev web ...`` (also ``serve``) to the browser backend before importing
 the Click CLI (which pulls in ``prompt_toolkit`` and reconfigures
-logging at import time — neither of which the server wants). Every other
+logging at import time — neither of which the server wants). ``status`` also
+routes to a lightweight, read-only metadata command. Every other
 invocation falls through to the existing TUI / classic CLI unchanged.
 """
 
@@ -12,6 +13,11 @@ import sys
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["status"]:
+        from infinidev.cli.status import run_from_argv
+
+        run_from_argv(sys.argv[2:])
+        return
     if sys.argv[1:2] and sys.argv[1] in {"serve", "web"}:
         from infinidev.server.cli import run_from_argv
 

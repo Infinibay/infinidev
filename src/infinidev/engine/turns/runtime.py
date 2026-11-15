@@ -30,6 +30,7 @@ from infinidev.engine.loop.llm_caller import (
 from infinidev.engine.loop.model_context import _get_model_max_context
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.multimodal import build_user_content, mention_paths_as_text
+from infinidev.engine.session_status import current_observer
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call, tool_to_openai_schema
 from infinidev.engine.tool_executor import capture_pre_content, maybe_emit_file_change
 from infinidev.engine.turns.models import TurnResult, TurnState
@@ -236,6 +237,15 @@ def _call(ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]]) -> LLMCal
         on_thinking_chunk=caller._on_thinking_chunk,
         on_stream_status=caller._on_stream_status)
     caller._track_usage(ctx, response)
+    usage = getattr(response, 'usage', None)
+    def provided(*names: str) -> bool:
+        for name in names:
+            value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+            if type(value) is int and value >= 0:
+                return True
+        return False
+    ctx.status_usage_fields = (provided('prompt_tokens', 'input_tokens'),
+                               provided('completion_tokens', 'output_tokens'))
     choice = response.choices[0]
     message = choice.message
     calls = getattr(message, 'tool_calls', None)
@@ -324,11 +334,26 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
     validation_diagnostics: list[str] = []
     unclosed_responses = 0
     receipt = {'run_id': uuid.uuid4().hex, 'closure': 'interrupted', 'dispatches': 0}
+    observer = current_observer()
+    if observer is not None:
+        observer.record('preparing', 'child_started', child_run_id=receipt['run_id'])
     tool_context = get_context_for_agent(agent.agent_id)
     session_id = tool_context.session_id or agent.agent_id
     workspace_path = tool_context.workspace_path or getattr(agent, 'workspace_path', None)
 
     def trace(event: str, **data: Any) -> None:
+        if observer is not None:
+            if event in {'runtime_request', 'provider_request'}:
+                observer.record('inference', 'model_request' if event == 'runtime_request'
+                                else 'provider_request')
+            elif event == 'model_response':
+                prompt, completion = getattr(ctx, 'status_usage_fields', (False, False))
+                observer.record('working', 'model_response', progress=True,
+                    model_elapsed_ms=data.get('elapsed_ms'),
+                    prompt_tokens=data.get('observed_prompt_tokens') if prompt else None,
+                    completion_tokens=data.get('observed_completion_tokens') if completion else None)
+            elif event == 'turn_closed':
+                observer.record('working', 'child_run_closed')
         if ctx is None:
             return
         body = json.dumps({'trace': 'turn_provenance', 'run_id': receipt['run_id'],
@@ -592,11 +617,16 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         # Count attempts, including host-denied calls, against the global fuse.
                         legacy_state.total_tool_calls += 1
                         pre_content = capture_pre_content(call.function.name, args, tracker)
+                        if observer is not None:
+                            observer.record('tool', 'tool_started', tool_name=call.function.name)
                         body = execute_tool_call(ctx.tool_dispatch, call.function.name, args,
                             hook_metadata={'project_id': agent.project_id,
                                 'agent_id': agent.agent_id,
                                 'cancel_event': engine._tool_cancel_event},
                             attachments_out=attachments)
+                        if observer is not None:
+                            observer.record('working', 'tool_completed', tool_name=call.function.name,
+                                            progress=True)
                         if call.function.name not in {'finish_turn', 'update_plan'}:
                             receipt['dispatches'] += 1
                             trace('tool_result', source='dispatcher',
