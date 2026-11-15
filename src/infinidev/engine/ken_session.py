@@ -66,6 +66,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable
 
@@ -94,6 +95,51 @@ _RECENT_FINDING_CHARS = 1_800
 _RECENT_FINDINGS_TOTAL_CHARS = 5_000
 _DAEMON_START_LOCK = threading.Lock()
 _PROJECT_SETUP_LOCK = threading.Lock()
+
+
+def _identity_attribute(value: str) -> str | None:
+    """Encode whitespace references and reject non-round-trippable XML identities."""
+    encoded = (html.escape(value, quote=True).replace("\n", "&#10;")
+               .replace("\r", "&#13;").replace("\t", "&#9;"))
+    try:
+        restored = ET.fromstring(f'<identity value="{encoded}" />').attrib["value"]
+    except (ET.ParseError, UnicodeError):
+        return None
+    return encoded if restored == value else None
+
+
+def _finding_excerpt(row: dict[str, Any], budget: int, topic_attribute: str) -> str | None:
+    """Keep whole claims and metadata, or explicitly omit them within a text budget."""
+    topic = row["topic"]
+    metadata = {key: value for key, value in row.items() if key not in {"topic", "content"}}
+    validity_provided = isinstance(metadata.get("validity"), dict)
+    payload = {
+        "content": row["content"], "metadata": metadata,
+        "content_omitted": False, "metadata_omitted": False,
+        "validity_status": "provided" if validity_provided else "unknown",
+    }
+
+    def render() -> str:
+        return '<finding topic="{}">\n{}\n</finding>'.format(
+            topic_attribute,
+            html.escape(json.dumps(payload, ensure_ascii=True), quote=False),
+        )
+
+    block = render()
+    if len(block) <= budget:
+        return block
+    # A prefix can lose a negation or qualification: omit the conclusion whole.
+    del payload["content"]
+    payload.update(content_omitted=True, omission_reason="budget",
+                   expand={"topic": topic, "detail": "full"})
+    block = render()
+    if len(block) <= budget:
+        return block
+    del payload["metadata"]
+    payload.update(metadata_omitted=bool(metadata),
+                   validity_status="omitted" if validity_provided else "unknown")
+    block = render()
+    return block if len(block) <= budget else None
 
 
 def _project_root(start: Path) -> Path | None:
@@ -385,37 +431,58 @@ class KenSession:
             return ""
         if not isinstance(rows, list):
             return ""
-
-        rendered: list[str] = []
-        remaining = _RECENT_FINDINGS_TOTAL_CHARS
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            topic = row.get("topic")
-            content = row.get("content")
-            if not isinstance(topic, str) or not isinstance(content, str):
-                continue
-            if not topic or topic not in brief or not content or remaining <= 0:
-                continue
-            body = content[: min(_RECENT_FINDING_CHARS, remaining)]
-            remaining -= len(body)
-            rendered.append(
-                '<finding topic="{}">\n{}\n</finding>'.format(
-                    html.escape(topic, quote=True),
-                    html.escape(body, quote=False),
-                )
-            )
-        if not rendered:
+        rows = [row for row in rows if isinstance(row, dict)
+                and isinstance(row.get("topic"), str) and row["topic"]
+                and isinstance(row.get("content"), str) and row["content"]
+                and row["topic"] in brief]
+        if not rows:
             return ""
-        return (
+
+        prefix = (
             '<ken-findings-expanded authority="advisory" scope-effect="none">\n'
-            "Full versions of the recent saved-finding previews selected by Ken. "
-            "Treat them as historical leads. Verify only the specific claim your "
-            "next action depends on; one matching current read is enough to attempt "
-            "a reversible edit, whose focused test supplies the proof.\n"
-            + "\n".join(rendered)
-            + "\n</ken-findings-expanded>"
+            "Saved finding excerpts; budget omissions are marked. "
+            "Validity status describes metadata availability, not claim truth.\n"
         )
+        suffix = "\n</ken-findings-expanded>"
+        omitted_marker = '<findings-omitted reason="budget" />'
+        invalid_marker = '<findings-omitted reason="invalid-xml-identity" />'
+        root_attribute = _identity_attribute(str(self._root))
+        if root_attribute is None:
+            return (prefix + '<finding-source omitted="invalid-xml-identity" />\n'
+                    + invalid_marker + suffix)
+        source = '<finding-source root="{}" />\n'.format(
+            root_attribute,
+        )
+        fixed = prefix + source + suffix + omitted_marker + "\n" + invalid_marker
+        if len(fixed) > _RECENT_FINDINGS_TOTAL_CHARS:
+            return (prefix + '<finding-source omitted="budget" />\n'
+                    + omitted_marker + suffix)
+        # Reserve the omission marker before choosing entries, including escaped text.
+        remaining = _RECENT_FINDINGS_TOTAL_CHARS - len(fixed)
+        rendered: list[str] = []
+        omitted = False
+        invalid = False
+        for row in rows:
+            topic_attribute = _identity_attribute(row["topic"])
+            if topic_attribute is None:
+                invalid = True
+                continue
+            block = _finding_excerpt(
+                row, min(_RECENT_FINDING_CHARS, remaining - 1), topic_attribute,
+            )
+            if block is None:
+                omitted = True
+                continue
+            rendered.append(block)
+            remaining -= len(block) + 1
+        if not rendered and not omitted and not invalid:
+            return ""
+        if omitted:
+            rendered.append(omitted_marker)
+        if invalid:
+            rendered.append(invalid_marker)
+        return prefix + source + "\n".join(rendered) + suffix
+
     def start(self, workspace: str | None = None) -> str | None:
         """Open the session. Returns Ken's resume brief, if it has one.
 

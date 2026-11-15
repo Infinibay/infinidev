@@ -187,7 +187,9 @@ def test_start_expands_the_recent_findings_ken_already_selected(workspace, monke
 
     assert brief in context
     assert "<ken-findings-expanded" in context
-    assert "one matching current read is enough" in context
+    assert "Full versions" not in context
+    assert "one matching current read is enough" not in context
+    assert '"validity_status": "unknown"' in context
     assert "sync.c reads p-&gt;vbufs &lt;before&gt; the pack loop." in context
     assert "must stay out" not in context
     assert runs == [
