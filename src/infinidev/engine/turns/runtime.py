@@ -29,6 +29,7 @@ from infinidev.engine.loop.llm_caller import (
 )
 from infinidev.engine.loop.model_context import _get_model_max_context
 from infinidev.engine.loop.models import LoopState
+from infinidev.engine.loop.user_message_injector import InjectedUserMessage
 from infinidev.engine.multimodal import build_user_content, mention_paths_as_text
 from infinidev.engine.session_status import current_observer
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call, tool_to_openai_schema
@@ -135,8 +136,11 @@ def _user_content(text: str, attachments: list[Any] | None, vision: bool) -> Any
     return (build_user_content if vision else mention_paths_as_text)(text, attachments)
 
 
-def _drain_guidance(engine: Any, messages: list[dict[str, Any]], vision: bool) -> bool:
+def _drain_guidance(engine: Any, messages: list[dict[str, Any]], vision: bool,
+                    retained: list[InjectedUserMessage] | None = None) -> bool:
     items = engine._user_message_injector._drain_items()
+    if retained is not None:
+        retained.extend(items)
     for item in items:
         messages.append({'role': 'user', 'content': _user_content(
             item.text, list(item.attachments), vision)})
@@ -316,12 +320,15 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
              initial_attachments: list[Any] | None = None, task_tools: list[Any] | None = None,
              max_iterations: int | None = None, max_total_tool_calls: int | None = None,
              prompt_configuration: Any = None, preserve_file_tracker: bool = False,
-             on_public_message: Callable[[str], None] | None = None) -> TurnResult:
+             on_public_message: Callable[[str], None] | None = None,
+             _parent_guidance: list[InjectedUserMessage] | None = None) -> TurnResult:
     """Execute one bounded conversation without creating or advancing a work Task.
 
     Cancellation belongs to the host turn: this method never clears it. Zero limits
     mean unlimited. Each invocation accounts for its own usage, including retries.
     Only host hook continuations preserve the existing file tracker and baseline.
+    Internal _parent_guidance retains original human ingress only within that
+    parent; it is neither model state nor a queue of new input.
     """
     turn_started = time.monotonic()
     legacy_state = LoopState()  # Usage and existing ToolContext compatibility only.
@@ -451,6 +458,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 + '\n</prior_state_context>'})
         messages.append({'role': 'user', 'content': _user_content(
             user_input, initial_attachments, vision)})
+        # Replayed ingress stays after the original request; pending input is newer.
+        for item in tuple(_parent_guidance or ()):
+            messages.append({'role': 'user', 'content': _user_content(
+                item.text, list(item.attachments), vision)})
         engine._last_turn_messages = messages
         window = _get_model_max_context(params)
         trace('turn_setup', scope='run_turn',
@@ -461,7 +472,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
-            _drain_guidance(engine, messages, vision)
+            _drain_guidance(engine, messages, vision, _parent_guidance)
             if max_iterations and iterations >= max_iterations:
                 return outcome('exhausted', 'Conversation interrupted: model call limit reached.')
             if max_calls and legacy_state.total_tool_calls >= max_calls:
@@ -516,7 +527,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 return outcome('cancelled', 'Conversation cancelled.')
             calls = result.tool_calls or []
             if not calls:
-                if _drain_guidance(engine, messages, vision):
+                if _drain_guidance(engine, messages, vision, _parent_guidance):
                     continue
                 if legacy_state.total_tool_calls:
                     if not ctx.manual_tc or not _protocol_payload(result.raw_content):
@@ -662,7 +673,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     state.finished, state.reply = False, None
                     return outcome('cancelled', 'Conversation cancelled.')
                 if state.finished:
-                    if _drain_guidance(engine, messages, vision):
+                    if _drain_guidance(engine, messages, vision, _parent_guidance):
                         state.finished, state.reply = False, None
                     else:
                         receipt['closure'] = 'finish_turn'

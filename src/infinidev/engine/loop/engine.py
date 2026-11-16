@@ -72,7 +72,7 @@ from infinidev.engine.loop.step_complete_gate import (
 from infinidev.engine.loop.step_manager import StepManager
 from infinidev.engine.loop.tool_processor import ToolProcessor
 from infinidev.engine.loop.tool_runner import ToolRunner
-from infinidev.engine.loop.user_message_injector import UserMessageInjector
+from infinidev.engine.loop.user_message_injector import InjectedUserMessage, UserMessageInjector
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.turns.models import TurnResult
 from infinidev.engine.engine_logging import (
@@ -772,6 +772,7 @@ class LoopEngine(AgentEngine):
         max_total_tool_calls: int | None = None, prompt_configuration: Any = None,
         preserve_file_tracker: bool = False,
         on_public_message: Callable[[str], None] | None = None,
+        _parent_guidance: list[InjectedUserMessage] | None = None,
     ) -> "TurnResult":
         """Run an agent-owned conversation without a legacy work Task."""
         from infinidev.engine.turns.runtime import run_turn
@@ -780,7 +781,7 @@ class LoopEngine(AgentEngine):
             initial_attachments=initial_attachments, task_tools=task_tools,
             max_iterations=max_iterations, max_total_tool_calls=max_total_tool_calls,
             prompt_configuration=prompt_configuration, preserve_file_tracker=preserve_file_tracker,
-            on_public_message=on_public_message)
+            on_public_message=on_public_message, _parent_guidance=_parent_guidance)
 
     def inject_message(
         self, message: str, attachments: list[Any] | None = None,

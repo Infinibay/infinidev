@@ -1518,6 +1518,7 @@ def _run_principal_turn(
 ) -> str:
     """Close a conversational turn without creating or advancing work Tasks."""
     from infinidev.config.settings import settings
+    from infinidev.engine.loop.user_message_injector import InjectedUserMessage
     from infinidev.engine.turns.models import TurnResult
     from infinidev.engine.user_hooks import UserHookEvent, task_instruction
     from infinidev.tools.base.context import set_repository_path
@@ -1529,6 +1530,7 @@ def _run_principal_turn(
     reply_marked = False
     history_initialized = False
     final_message_hash = None
+    parent_guidance: list[InjectedUserMessage] = []
 
     def publish(message: str, *, final: bool = False) -> None:
         nonlocal reply_marked, history_initialized, final_message_hash
@@ -1581,6 +1583,7 @@ def _run_principal_turn(
                 break
             turn = engine.run_turn(
                 agent, user_input, turn_context=turn_context,
+                _parent_guidance=parent_guidance,
                 initial_attachments=attachments if pass_index == 0 else None,
                 max_iterations=remaining_iterations,
                 max_total_tool_calls=remaining_tools,
