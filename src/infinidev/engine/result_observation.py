@@ -12,6 +12,10 @@ from infinidev.code_intel._db import execute_with_retry
 _SCAN_ROWS = 4096
 _RESULT_ROWS = 512
 _TRACE_BYTES = 16 * 1024
+# The legacy runtime writer splits JSON at this character boundary.
+_ARCHIVE_PART_CHARS = 8000
+_ARCHIVE_EVENTS = {"turn_setup", "runtime_request", "provider_request", "model_response",
+                   "tool_result", "public_message", "protocol_reminder", "turn_closed"}
 _FIELDS = ("trace", "run_id", "event", "iteration", "source", "tool",
            "output_sha256", "output_bytes", "status", "closure", "dispatches")
 
@@ -25,11 +29,44 @@ def _integer(value: Any) -> bool:
     return type(value) is int and value >= 0
 
 
+def _archive_label(title: Any) -> tuple[str, str, int, int] | None:
+    """Parse bounded writer metadata; it attributes parts, not their authenticity."""
+    if not isinstance(title, str) or len(title) > 200:
+        return None
+    tokens = title.split(" ")
+    if (len(tokens) != 7 or tokens[0] != "turn" or not _hex(tokens[1], 32)
+            or tokens[2] != "result" or tokens[5] != "part"):
+        return None
+    counters = tokens[3].split("/")
+    numbers = [*counters, tokens[6]]
+    if len(counters) != 2 or any(
+        not text.isascii() or not text.isdecimal()
+        or (len(text) > 1 and text[0] == "0") for text in numbers
+    ):
+        return None
+    part = int(tokens[6])
+    name = tokens[4]
+    prefix = "turn_provenance_"
+    if (part < 1 or not name.startswith(prefix)
+            or len(name) < len(prefix) + 34):
+        return None
+    run = name[len(prefix):len(prefix) + 32]
+    event = name[len(prefix) + 33:]
+    if (not _hex(run, 32) or name[len(prefix) + 32] != "_"
+            or event not in _ARCHIVE_EVENTS):
+        return None
+    return run, event, int(counters[0]), part
+
+
 def _project(conn: sqlite3.Connection, session_id: str) -> list[dict[str, Any]]:
     table = conn.execute("SELECT type FROM pragma_table_list "
                          "WHERE schema='main' AND name='working_memory'").fetchone()
     if table is None or table[0] != "table":
         raise sqlite3.DatabaseError("trace table unavailable")
+    columns = {row[0] for row in conn.execute(
+        "SELECT name FROM pragma_table_info('working_memory')")}
+    title = ("CASE WHEN typeof(title)='text' AND length(CAST(title AS BLOB))<=200 "
+             "THEN title END" if "title" in columns else "NULL")
     # CASE guards JSON parsing and projection size even for corrupt/oversized rows.
     integer_fields = {"iteration", "output_bytes", "dispatches"}
     fields = ",".join(
@@ -39,13 +76,18 @@ def _project(conn: sqlite3.Connection, session_id: str) -> list[dict[str, Any]]:
         for field in _FIELDS)
     rows = conn.execute(
         "WITH recent AS (SELECT rowid,substr(created_at,1,65) AS created_at,"
+        f"{title} AS archive_title,typeof(content) AS content_type,"
+        "length(content) AS content_chars,length(CAST(content AS BLOB)) AS content_bytes,"
+        "instr(content,char(0)) AS nul_position,"
         "CASE WHEN typeof(content)='text' AND length(CAST(content AS BLOB))<=? "
         "AND json_valid(content) THEN content ELSE '{}' END AS safe_content,"
         "CASE WHEN typeof(content)='text' AND length(CAST(content AS BLOB))<=? "
         "AND json_valid(content) THEN 1 ELSE 0 END AS valid "
         "FROM working_memory NOT INDEXED WHERE session_id=? AND kind='runtime_trace' "
         "ORDER BY rowid DESC LIMIT ?) "
-        f"SELECT rowid,created_at,valid,{fields} FROM recent",
+        "SELECT rowid,created_at,archive_title,content_type,content_chars,content_bytes,"
+        f"nul_position,valid,{fields} "
+        "FROM recent",
         (_TRACE_BYTES, _TRACE_BYTES, session_id, _SCAN_ROWS + 1),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -82,15 +124,32 @@ def read_tool_results(workspace: Path, session_id: str, run_id: str) -> dict[str
 
     scan_clipped = len(rows) > _SCAN_ROWS
     rows = rows[:_SCAN_ROWS]
-    if any(row["valid"] != 1 for row in rows):
-        return {**result, "reason": "invalid_trace"}
-    selected = sorted((row for row in rows if row["run_id"] == run_id),
-                      key=lambda row: row["rowid"])
+    foreign_parts = 0
+    selected = []
+    for row in rows:
+        label = _archive_label(row["archive_title"])
+        if row["valid"] != 1:
+            chars = row["content_chars"]
+            if (label is not None and label[0] != run_id and row["content_type"] == "text"
+                    and row["content_bytes"] <= _TRACE_BYTES and row["nul_position"] == 0
+                    and type(chars) is int and 0 < chars <= _ARCHIVE_PART_CHARS
+                    and (label[3] > 1 or chars == _ARCHIVE_PART_CHARS)):
+                foreign_parts += 1
+                continue
+            return {**result, "reason": "invalid_trace"}
+        if (row["trace"] != "turn_provenance" or not _hex(row["run_id"], 32)
+                or (label is not None and label[:3] != (
+                    row["run_id"], row["event"], row["iteration"]))):
+            return {**result, "reason": "invalid_trace"}
+        if row["run_id"] == run_id:
+            selected.append(row)
+    selected.sort(key=lambda row: row["rowid"])
     if not selected:
         return {**result, "reason": "trace_not_found", "coverage": {
             "scope": "retained_window", "history_complete": False,
             "scanned_rows": len(rows), "scan_limit": _SCAN_ROWS,
             "scan_clipped": scan_clipped,
+            "foreign_archive_parts_skipped": foreign_parts,
         }}
     tools = []
     closure = None
@@ -130,6 +189,7 @@ def read_tool_results(workspace: Path, session_id: str, run_id: str) -> dict[str
             "coverage": {"scope": "retained_window", "history_complete": False,
                          "ordering": "sqlite_rowid", "scanned_rows": len(rows),
                          "scan_limit": _SCAN_ROWS, "scan_clipped": scan_clipped,
+                         "foreign_archive_parts_skipped": foreign_parts,
                          "result_limit": _RESULT_ROWS, "results_clipped": clipped},
             "results": {"count": len(tools), "latest": latest,
                         "latest_occurrences": sum(fingerprint(row) == fingerprint(latest)

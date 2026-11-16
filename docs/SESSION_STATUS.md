@@ -108,3 +108,13 @@ Python, and metadata string/primitive types are checked before publication.
 or proof of current idle. This member never changes the existing status state,
 owner selection, freshness or restart authority. It can be useful when the named
 file observation is already historical; supervisors must inspect both scopes.
+
+The legacy runtime writer may split one JSON event into 8000-character archive
+parts. The observer does not join or reconstruct them. A bounded, strictly parsed
+producer title can attribute an incomplete part to a **different** run; only those
+foreign parts with the expected chunk shape are excluded from the named query.
+`coverage.foreign_archive_parts_skipped` counts excluded **rows**, not events.
+They still consume the original scan window and `history_complete` stays false.
+A selected run's unparsed parts, unknown/corrupt records or a contradiction between
+a parsed producer label and JSON metadata yield `unavailable` with null results.
+The title is local attribution metadata, not authentication or an integrity proof.
