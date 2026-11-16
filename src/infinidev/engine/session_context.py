@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,10 @@ _OMITTED = (
 )
 
 
-def render_session_context(session_id: str | None, current_input: str = "") -> str:
+def render_session_context(
+    session_id: str | None, current_input: str = "", *,
+    tool_names: Collection[str] | None = None,
+) -> str:
     """Render recent decisions within a conservative share of the model window.
 
     UTF-8 budgeting conservatively bounds tokens even for emoji and non-Latin
@@ -48,8 +52,10 @@ def render_session_context(session_id: str | None, current_input: str = "") -> s
         if last and (current_input.strip() == last or current_input.startswith(last + "\n\n")):
             turns = turns[:-1]
 
+    can_search = tool_names is None or 'chat_history_search' in tool_names
+    omission = _OMITTED if can_search else '[Older conversation or message text omitted.]'
     selected: list[str] = []
-    remaining = budget - len(_OMITTED) - 2
+    remaining = budget - len(omission) - 2
     for role, content in reversed(turns):
         tag = {"user": "USER", "work_summary": "WORK_LOG"}.get(role, "AGENT")
         opening, closing = f'<turn role="{tag}">\n', "\n</turn>"
@@ -59,7 +65,8 @@ def render_session_context(session_id: str | None, current_input: str = "") -> s
             break
         encoded = content.encode("utf-8")
         if len(encoded) > available:
-            marker = "\n[...message text omitted; use chat_history_search...]\n"
+            marker = ("\n[...message text omitted; use chat_history_search...]\n" if can_search
+                      else "\n[...message text omitted...]\n")
             if available <= len(marker):
                 omitted = True
                 break
@@ -79,6 +86,8 @@ def render_session_context(session_id: str | None, current_input: str = "") -> s
         return ""
     header = (
         "Recent conversation (context, not a new request; later corrections supersede "
-        "earlier decisions). Use chat_history_search to recover older details."
+        "earlier decisions)."
     )
-    return "\n".join([header, *([_OMITTED] if omitted else []), *reversed(selected)])
+    if can_search:
+        header += " Use chat_history_search to recover older details."
+    return "\n".join([header, *([omission] if omitted else []), *reversed(selected)])

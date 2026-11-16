@@ -29,7 +29,7 @@ def boundary(monkeypatch, temp_db, workspace_dir):
     monkeypatch.setattr(pipeline, "_run_task_start_hook", lambda **kw: "start context")
     monkeypatch.setattr(pipeline, "_task_end_hook", lambda *a, **kw: "")
     monkeypatch.setattr("infinidev.engine.session_context.render_session_context",
-                        lambda *a: "previous conversation")
+                        lambda *a, **kw: "previous conversation")
     monkeypatch.setattr("infinidev.engine.orchestration.chat_agent.run_chat_agent",
                         Mock(side_effect=AssertionError("preclassification")))
     hooks = Mock()

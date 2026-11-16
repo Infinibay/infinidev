@@ -198,10 +198,13 @@ def test_runtime_issues_stable_refs_and_exact_recall_stays_complete_json(runtime
     assert engine._last_turn_receipt["dispatches"] == 2
 
 
-def test_runtime_archive_failure_keeps_literal_tool_result(runtime, monkeypatch):
+@pytest.mark.parametrize('recall_offered', [False, True])
+def test_runtime_archive_failure_keeps_literal_tool_result(runtime, monkeypatch, recall_offered):
     from infinidev.engine.working_memory import get_working_memory
 
     engine, agent, script, seen = runtime
+    if recall_offered:
+        agent.tools.append(RecallContextTool())
     memory = get_working_memory("unused")  # Runtime fixture binds the isolated ledger.
     monkeypatch.setattr(memory, "archive_output", lambda *a, **kw: None)
     source = "literal data\n" * 300
@@ -209,7 +212,8 @@ def test_runtime_archive_failure_keeps_literal_tool_result(runtime, monkeypatch)
     assert engine.run_turn(agent, "read data").status == "answered"
     body = next(m["content"] for m in seen[-1][0] if m["role"] == "tool")
     assert body.startswith(source)
-    assert "recall_context query:" in body and "wm-archive:" not in body
+    assert "query:" in body and "wm-archive:" not in body
+    assert ('recall_context query:' in body) is recall_offered
 
 
 def test_page_is_returned_from_verified_snapshot_not_a_second_read(memory, monkeypatch):

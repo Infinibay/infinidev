@@ -58,6 +58,26 @@ otherwise valid calls. Permission checks still apply to granted tools. Rejected
 violations do not mean a programming task succeeded, and this feature does not
 certify model claims or semantic progress.
 
+A rejected exact name reports `tool_not_offered` at `tool_name`, separately from
+argument/schema errors. Feedback includes `executed=false`, `requested_name` and
+`offered_names` from that request's dispatch snapshot. Long diagnostics carry
+explicit completeness flags and the total offered count; the full schemas remain
+the authority. No prefix, alias or spelling is automatically corrected. A retry
+uses the existing budgets and three consecutive rejected-batch limit. Structural
+archive diagnostics retain names/types, never argument values or reasoning.
+
+Generated conversation-history guidance recommends `chat_history_search` only
+when the explicit grant includes it. Archive envelopes retain their exact
+reference or title but recommend `recall_context` only when it is offered. Prior
+host envelopes are projected for the current catalog without rewriting saved
+references, user messages, notes or source text. With no explicit override the
+history renderer keeps its existing behavior; archive guidance follows the actual
+runtime catalog. Evidence views remain bounded to 500 characters each; oversized
+or previously clipped host envelopes are explicitly incomplete neutral excerpts,
+not executable complete references. Loading a view does not shorten the saved
+original reference. Project instructions, human history, custom agent identities and
+tool-authored output are not scanned or rewritten to remove tool names.
+
 A tool selection is not a path or OS sandbox. A granted tool can still reach its
 ordinary permitted paths and effects; user-installed preparation hooks and
 separate agents are not sandboxed by this model-tool catalog. No automatic

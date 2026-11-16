@@ -1115,8 +1115,9 @@ def run_task(
     if conversational:
         from infinidev.engine.session_context import render_session_context
 
+        history_options = {'tool_names': tool_grant.names} if tool_grant is not None else {}
         turn_context = _join_blocks(
-            render_session_context(session_id, user_input), turn_context,
+            render_session_context(session_id, user_input, **history_options), turn_context,
         )
         if tool_grant is None and (force_gather or _settings.GATHER_ENABLED):
             gathered, _ = _run_gather_phase(

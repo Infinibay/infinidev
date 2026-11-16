@@ -6,7 +6,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from types import SimpleNamespace
 from typing import Any
 
@@ -119,12 +119,29 @@ def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
     try:
         data = get_session_runtime_state(session_id).get('ui_state', {}).get('conversation', {})
         references = data.get('evidence', [])
-        references = [value[:500] for value in references[-40:]
+        references = [value for value in references[-40:]
                       if isinstance(value, str) and ' turn_provenance_' not in value]
         return TurnState.model_validate(data), references
     except (ValidationError, TypeError, ValueError):
         logger.warning('Ignoring invalid persisted conversation state', exc_info=True)
         return TurnState(), []
+
+
+def _reference_for_tools(reference: str, tool_names: Collection[str]) -> str:
+    """Project only host-owned archive envelopes; their identifiers stay opaque."""
+    for field in ('reference', 'query'):
+        for instruction in ('recall_context ', ''):
+            prefix = f'[Archived evidence; {instruction}{field}: '
+            if reference.startswith(prefix):
+                complete = reference.endswith(']')
+                identifier = reference[len(prefix):-1] if complete else reference[len(prefix):]
+                available = 'recall_context ' if 'recall_context' in tool_names else ''
+                projected = f'[Archived evidence; {available}{field}: {identifier}]'
+                if complete and len(projected) <= 500:
+                    return projected
+                excerpt = f'[Archived evidence; {field} excerpt (incomplete): '
+                return excerpt + identifier[:500 - len(excerpt) - 1] + ']'
+    return reference[:500]
 
 
 def _user_content(text: str, attachments: list[Any] | None, vision: bool) -> Any:
@@ -271,10 +288,38 @@ def _call(ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]]) -> LLMCal
         tool_call_origin=origin)
 
 
+class _ToolNotOffered(ValueError):
+    """An exact name is absent from this request's dispatch snapshot."""
+
+    def __init__(self, name: str, offered_names: tuple[str, ...]) -> None:
+        super().__init__('Requested tool is not offered for this turn.')
+        self.name = name
+        self.offered_names = offered_names
+
+
+def _tool_name_details(name: str, offered_names: tuple[str, ...]) -> dict[str, Any]:
+    """Bound diagnostics without presenting a partial catalog as complete."""
+    names: list[str] = []
+    size = 2  # JSON array brackets.
+    for offered in offered_names:
+        added = len(json.dumps(offered, ensure_ascii=False).encode('utf-8'))
+        added += 2 if names else 0
+        if size + added > 8192:
+            break
+        names.append(offered)
+        size += added
+    return {'requested_name': name[:100], 'requested_name_complete': len(name) <= 100,
+            'offered_names': names, 'offered_names_complete': len(names) == len(offered_names),
+            'offered_name_count': len(offered_names)}
+
+
 def _validated_arguments(ctx: Any, call: Any) -> dict[str, Any]:
-    tool = ctx.tool_dispatch.get(call.function.name)
+    name = call.function.name
+    if not isinstance(name, str):
+        raise ValueError('Tool name must be a string')
+    tool = ctx.tool_dispatch.get(name)
     if tool is None:
-        raise ValueError(f'Tool {call.function.name!r} is not granted for this turn')
+        raise _ToolNotOffered(name, tuple(ctx.tool_dispatch))
     raw = call.function.arguments
     args = json.loads(raw) if isinstance(raw, str) else raw
     if not isinstance(args, dict):
@@ -450,7 +495,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 '<conversation_context>\n' + turn_context + '\n</conversation_context>'})
         if state.plan or state.notes or references:
             messages.append({'role': 'user', 'content':
-                '<prior_state_context>\n' + json.dumps({**_bounded_state(state), 'evidence': references}, ensure_ascii=False)
+                '<prior_state_context>\n' + json.dumps({**_bounded_state(state), 'evidence': [
+                    _reference_for_tools(ref, ctx.tool_dispatch) for ref in references]},
+                    ensure_ascii=False)
                 + '\n</prior_state_context>'})
         messages.append({'role': 'user', 'content': _user_content(
             user_input, initial_attachments, vision)})
@@ -556,9 +603,14 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             # Validate the entire transport batch before executing any of it.
             validated = []
             errors = {}
+            unoffered = {}
             for call in calls:
                 try:
                     validated.append((call, _validated_arguments(ctx, call)))
+                except _ToolNotOffered as exc:
+                    unoffered[call.id] = exc
+                    errors[call.id] = [{'type': 'tool_not_offered', 'loc': ('tool_name',),
+                                        'msg': str(exc)}]
                 except (ValueError, TypeError) as exc:
                     errors[call.id] = (exc.errors(include_input=False, include_context=False,
                                                 include_url=False)
@@ -575,8 +627,12 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                      'type': problem['type']}
                     for problem in errors.get(call.id, [])]}
                     for call in calls]
+                for call, item in zip(calls, rejected):
+                    if call.id in unoffered:
+                        failure = unoffered[call.id]
+                        item.update(_tool_name_details(failure.name, failure.offered_names))
                 report = json.dumps({'event': 'tool_validation_rejected',
-                    'batch': iterations, 'executed': False, 'calls': rejected})
+                    'batch': iterations, 'executed': False, 'calls': rejected}, ensure_ascii=False)
                 reference = _archive(ctx, iterations, 'tool_validation_rejected', {}, report)
                 if reference:
                     references.append(reference)
@@ -589,17 +645,27 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 validation_diagnostics[:] = validation_diagnostics[-3:]
                 messages.append(_action_message(ctx, result, calls))
                 for call in calls:
+                    recovery = 'Correct the invalid arguments using the tool schema and '
+                    recovery += 'resubmit the pending calls. No call in this batch executed.'
+                    details = {}
+                    if unoffered:
+                        offered = next(iter(unoffered.values())).offered_names
+                        details = _tool_name_details(call.function.name, offered)
+                        recovery = ('Use an exact offered tool name and its schema. '
+                                    'If offered_names_complete is false, consult the request '
+                                    'tool schemas for the full catalog. Correct any argument '
+                                    'errors and resubmit the pending calls. '
+                                    'No call in this batch executed.')
                     body = json.dumps({'error': 'Tool batch rejected before execution.',
                         'executed': False, 'errors': errors.get(call.id, []),
-                        'recovery': 'Correct the invalid arguments using the tool schema and '
-                                    'resubmit the pending calls. No call in this batch executed.'})
+                        **details, 'recovery': recovery}, ensure_ascii=False)
                     messages.append({'role': 'user', 'content':
                         f'[Tool: {call.function.name}] Result:\n{body}', '_tool_result': True}
                         if ctx.manual_tc else {'role': 'tool', 'tool_call_id': call.id,
                                                'content': body})
                 if invalid_batches >= 3:
                     return outcome('failed',
-                        'Conversation interrupted: tool argument validation failed in 3 batches.')
+                        'Conversation interrupted: tool validation failed in 3 batches.')
                 continue
             invalid_batches = 0
             messages.append(_action_message(ctx, result, calls))
@@ -694,7 +760,8 @@ def _archive(ctx: Any, iteration: int, name: str, args: dict[str, Any], body: st
                 f'turn {archive_id} result {iteration}/{ctx.state.total_tool_calls} {name}',
                 body, step_index=iteration)
             if reference:
-                return '[Archived evidence; recall_context reference: ' + reference + ']'
+                return _reference_for_tools('[Archived evidence; reference: ' + reference + ']',
+                                            ctx.tool_dispatch)
         for offset in range(0, len(body), MAX_ARCHIVE_CHARS):
             title = (f'turn {archive_id} result {iteration}/{ctx.state.total_tool_calls} '
                      f'{name} part {offset // MAX_ARCHIVE_CHARS + 1}')
@@ -702,7 +769,8 @@ def _archive(ctx: Any, iteration: int, name: str, args: dict[str, Any], body: st
                                kind=kind, step_index=iteration):
                 titles.append(title)
         if titles:
-            return '[Archived evidence; recall_context query: ' + titles[0] + ']'
+            return _reference_for_tools('[Archived evidence; query: ' + titles[0] + ']',
+                                        getattr(ctx, 'tool_dispatch', {}))
     except Exception:
         logger.warning('Conversation evidence archival failed', exc_info=True)
     return ''
