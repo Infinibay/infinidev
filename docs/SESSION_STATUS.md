@@ -24,6 +24,16 @@ The final SHA256 identifies the redacted message emitted through host callbacks,
 not an acknowledgment of a frontend database commit or proof of task correctness.
 Different requests may emit identical hashes.
 
+A query with `--turn`, `--run`, or both selects only a uniquely matching owner.
+Both filters must match the same record. Its freshness is checked independently
+of unrelated owners: a stale record from another domain cannot discredit a fresh
+named turn. `other_active_owners` counts other fresh pending owners, while
+`other_owners_unconfirmed` reports pending owners whose liveness or scope cannot
+be confirmed. These fields qualify the session, not the named observation.
+A named `closed` result therefore does **not** certify session-wide idle or permit
+an automatic restart. No records are deleted or declared dead by this selection.
+Multiple matching owners, a stale named owner or a missing match stay `unknown`.
+
 Between requests the default answer is `unknown`, with validated `last_known`
 metadata when available. An old closed request does not establish that the REPL
 is idle, that no input is queued or that a new request is finished. Pre-context
@@ -34,8 +44,9 @@ boundaries.
 Freshness requires a matching Linux boot/PID-namespace/process-start identity
 and a heartbeat no older than 15 seconds. The writer refreshes it every 5 seconds;
 a heartbeat is liveness evidence, not work progress. Unsupported identity checks,
-stale/future timestamps, multiple active owners, invalid records or read-budget
-limits produce `unknown`. Named closures also become historical after the lease;
+stale/future timestamps, invalid records or read-budget limits produce `unknown`.
+An unfiltered session query also stays unknown for unconfirmed pending owners or
+multiple active owners. Named closures also become historical after the lease;
 consult `last_known` without promoting it to current state.
 
 Snapshots are bounded to 8 KiB and atomically replaced. The reader scans at most

@@ -166,26 +166,44 @@ def read_status(workspace: Path, session_id: str, *, expected_turn: str | None =
     latest = max(records, key=lambda row: row["heartbeat_at"])
     result["last_known"] = latest
     pending = [row for row in records if row["phase"] != "closed" and not _definitely_dead(row)]
-    if any(not _fresh(row) for row in pending):
-        return {**result, "reason": "owner_unconfirmed"}
-    active = [row for row in pending if row["phase"] != "unknown"]
-    if any(row["phase"] == "unknown" for row in pending):
-        return {**result, "reason": "scope_interrupted"}
-    if len(active) > 1:
-        return {**result, "reason": "multiple_active_owners"}
-    chosen = active[0] if active else latest
+    named = expected_turn is not None or expected_run is not None
+    if named:
+        result["scope"] = "named_turn"
+        matches = [row for row in records
+                   if (expected_turn is None or row["host_turn_id"] == expected_turn)
+                   and (expected_run is None or row["child_run_id"] == expected_run)]
+        if not matches:
+            return {**result, "reason": "turn_mismatch"}
+        if len(matches) > 1:
+            return {**result, "reason": "multiple_matching_owners"}
+        chosen = matches[0]
+        # Other owners qualify session-wide uncertainty, not the authority of
+        # this explicitly selected observation. No record is retired here.
+        others = [(row, _fresh(row)) for row in pending if row is not chosen]
+        result["other_active_owners"] = sum(
+            fresh and row["phase"] != "unknown" for row, fresh in others
+        )
+        result["other_owners_unconfirmed"] = any(
+            not fresh or row["phase"] == "unknown" for row, fresh in others
+        )
+    else:
+        if any(not _fresh(row) for row in pending):
+            return {**result, "reason": "owner_unconfirmed"}
+        active = [row for row in pending if row["phase"] != "unknown"]
+        if any(row["phase"] == "unknown" for row in pending):
+            return {**result, "reason": "scope_interrupted"}
+        if len(active) > 1:
+            return {**result, "reason": "multiple_active_owners"}
+        chosen = active[0] if active else latest
     result["last_known"] = chosen
-    if ((expected_turn is not None and chosen["host_turn_id"] != expected_turn)
-            or (expected_run is not None and chosen["child_run_id"] != expected_run)):
-        return {**result, "reason": "turn_mismatch"}
     if not _fresh(chosen):
         return {**result, "reason": "owner_unconfirmed"}
-    if chosen["phase"] == "closed" and expected_turn is None:
+    if chosen["phase"] == "closed" and not named:
         return {**result, "reason": "between_turns"}
     if chosen["phase"] == "unknown":
         return {**result, "reason": "scope_interrupted"}
     return {**result, "state": chosen["phase"], "reason": "host_observation",
-            "scope": "named_turn" if expected_turn is not None else "active_principal",
+            "scope": "named_turn" if named else "active_principal",
             "observation": chosen}
 
 

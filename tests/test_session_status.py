@@ -26,6 +26,98 @@ def observe(root, publisher, **kwargs):
     return status.read_status(root, "session", **kwargs)
 
 
+def stored_owner(root, owner, *, phase="inference", **changes):
+    publisher = status.StatusPublisher(root, "session", owner)
+    record = dict(publisher._data)
+    record.update(phase=phase, **changes)
+    directory = status._bucket(root, "session", create=True)
+    (directory / (owner + ".json")).write_text(json.dumps(record))
+    return record
+
+
+@pytest.mark.parametrize("selector", ["expected_turn", "expected_run"])
+def test_named_fresh_owner_survives_unconfirmed_other_domain(tmp_path, clock, selector):
+    selected = stored_owner(tmp_path, "a" * 32, child_run_id="c" * 32)
+    stored_owner(tmp_path, "b" * 32, process_domain="another-boot", heartbeat_monotonic=9999)
+    requested = selected["host_turn_id"] if selector == "expected_turn" else "c" * 32
+
+    result = status.read_status(tmp_path, "session", **{selector: requested})
+
+    assert result["state"] == "inference"
+    assert result["scope"] == "named_turn"
+    assert result["observation"]["owner_instance_id"] == "a" * 32
+    assert result["other_owners_unconfirmed"] is True
+    assert result["other_active_owners"] == 0
+    assert status.read_status(tmp_path, "session")["reason"] == "owner_unconfirmed"
+    assert len(list(status._bucket(tmp_path, "session").glob("*.json"))) == 2
+
+
+def test_named_fresh_owner_does_not_hide_another_fresh_active_owner(tmp_path, clock):
+    selected = stored_owner(tmp_path, "a" * 32)
+    stored_owner(tmp_path, "b" * 32, phase="tool")
+
+    result = status.read_status(tmp_path, "session", expected_turn=selected["host_turn_id"])
+
+    assert result["state"] == "inference"
+    assert result["other_active_owners"] == 1
+    assert result["other_owners_unconfirmed"] is False
+    assert status.read_status(tmp_path, "session")["reason"] == "multiple_active_owners"
+
+
+@pytest.mark.parametrize("selector", ["expected_turn", "expected_run"])
+def test_named_closed_owner_keeps_other_owner_uncertainty(tmp_path, clock, selector):
+    selected = stored_owner(
+        tmp_path, "a" * 32, phase="closed", child_run_id="c" * 32,
+        terminal_status="answered", closed_at=clock[0], final_message_sha256="d" * 64,
+    )
+    stored_owner(tmp_path, "b" * 32, process_domain="another-boot")
+    requested = selected["host_turn_id"] if selector == "expected_turn" else "c" * 32
+
+    result = status.read_status(tmp_path, "session", **{selector: requested})
+
+    assert result["state"] == "closed"
+    assert result["scope"] == "named_turn"
+    assert result["observation"]["final_message_sha256"] == "d" * 64
+    assert result["other_owners_unconfirmed"] is True
+    assert status.read_status(tmp_path, "session")["state"] == "unknown"
+
+
+def test_named_selector_never_picks_between_matching_owners(tmp_path, clock):
+    selected = stored_owner(tmp_path, "a" * 32)
+    stored_owner(tmp_path, "b" * 32, host_turn_id=selected["host_turn_id"])
+
+    result = status.read_status(tmp_path, "session", expected_turn=selected["host_turn_id"])
+
+    assert result["state"] == "unknown"
+    assert result["reason"] == "multiple_matching_owners"
+    assert "observation" not in result
+
+
+def test_named_selector_requires_both_parent_and_child_to_match(tmp_path, clock):
+    selected = stored_owner(tmp_path, "a" * 32, child_run_id="c" * 32)
+    stored_owner(tmp_path, "b" * 32, child_run_id="d" * 32)
+
+    result = status.read_status(
+        tmp_path, "session", expected_turn=selected["host_turn_id"], expected_run="d" * 32,
+    )
+
+    assert result["state"] == "unknown"
+    assert result["reason"] == "turn_mismatch"
+    assert "observation" not in result
+
+
+def test_named_stale_owner_is_not_replaced_by_another_fresh_owner(tmp_path, clock):
+    selected = stored_owner(tmp_path, "a" * 32, heartbeat_monotonic=0)
+    stored_owner(tmp_path, "b" * 32)
+
+    result = status.read_status(tmp_path, "session", expected_turn=selected["host_turn_id"])
+
+    assert result["state"] == "unknown"
+    assert result["reason"] == "owner_unconfirmed"
+    assert result["last_known"]["owner_instance_id"] == "a" * 32
+    assert "observation" not in result
+
+
 def test_reader_does_not_create_state(tmp_path):
     result = status.read_status(tmp_path, "missing")
     assert result["state"] == "unknown"
