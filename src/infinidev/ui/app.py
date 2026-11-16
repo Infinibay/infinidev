@@ -12,6 +12,8 @@ import uuid
 from collections import deque
 from typing import Any
 
+from infinidev.engine.turns.catalog import ToolGrant
+
 from prompt_toolkit.application import Application
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout.containers import (
@@ -185,9 +187,12 @@ class InfinidevApp:
         self._permission_allow_button = None
         self._permission_deny_button = None
         self._context_admission_state: dict[str, object] = {}
-        self._context_admission_pending: tuple[str, list] | None = None
+        self._context_admission_pending: (
+            tuple[str, list] | tuple[str, list, ToolGrant] | None
+        ) = None
         self._context_admission_compact_button = None
         self._context_admission_switch_button = None
+        self._context_admission_cancel_button = None
 
     def _init_content_windows(self) -> None:
         self._float_container = None
@@ -889,12 +894,15 @@ class InfinidevApp:
 
     # ── Submit handler ───────────────────────────────────────────────
 
-    def _request_context_admission(self, user_input: str, attachments: list) -> bool:
+    def _request_context_admission(self, user_input: str, attachments: list,
+                                   *, task_tools: ToolGrant | None = None) -> bool:
         """Show a decision modal when the selected model lacks useful headroom.
 
         The task input remains queued in memory while the user decides, so the
         same session, attachments, and staged context begin after either path.
         """
+        if self._context_admission_pending is not None:
+            raise ValueError('Another task is awaiting context admission')
         try:
             from infinidev.config.llm import get_litellm_params
             from infinidev.config.providers import get_provider
@@ -920,7 +928,20 @@ class InfinidevApp:
             "active_window": admission.active_window,
             "replacement_model": admission.replacement_model,
         }
-        self._context_admission_pending = (user_input, attachments)
+        pending = ((user_input, list(attachments), task_tools) if task_tools is not None
+                   else (user_input, attachments))
+        self._context_admission_pending = pending
+        for attr, action in (
+            ('_context_admission_compact_button',
+             lambda: self._resolve_context_admission(False, expected_request=pending)),
+            ('_context_admission_switch_button',
+             lambda: self._resolve_context_admission(True, expected_request=pending)),
+            ('_context_admission_cancel_button',
+             lambda: self._cancel_context_admission(expected_request=pending)),
+        ):
+            button = getattr(self, attr, None)
+            if button is not None:
+                button.handler = action
         self._actions_text = "Waiting for context-window decision"
         self.active_dialog = "context_admission"
         try:
@@ -936,12 +957,20 @@ class InfinidevApp:
         self.invalidate()
         return True
 
-    def _resolve_context_admission(self, use_larger_model: bool) -> None:
+    def _resolve_context_admission(self, use_larger_model: bool,
+                                   *, expected_request: object | None = None) -> None:
         """Apply the chosen admission action and launch the preserved task."""
         pending = self._context_admission_pending
         state = self._context_admission_state
-        if pending is None:
+        if pending is None or (expected_request is not None and expected_request is not pending):
             return
+        if len(pending) == 3:
+            try:
+                pending[2].validate()
+            except ValueError as exc:
+                self._cancel_context_admission(expected_request=pending)
+                self.add_message('System', str(exc), 'system')
+                return
 
         replacement = state.get("replacement_model")
         if use_larger_model and isinstance(replacement, str) and replacement:
@@ -968,7 +997,18 @@ class InfinidevApp:
         self.active_dialog = None
         self._start_engine_task(*pending)
 
-    def _start_engine_task(self, user_input: str, attachments: list) -> None:
+    def _cancel_context_admission(self, *, expected_request: object | None = None) -> None:
+        pending = self._context_admission_pending
+        if pending is None or (expected_request is not None and expected_request is not pending):
+            return
+        self._context_admission_pending = None
+        self._context_admission_state = {}
+        self.active_dialog = None
+        self._actions_text = 'Task cancelled before starting'
+        self.invalidate()
+
+    def _start_engine_task(self, user_input: str, attachments: list,
+                           task_tools: ToolGrant | None = None) -> None:
         """Launch an already accepted task without changing its session state."""
         self._engine_running = True
         self._chat_history_control.show_thinking = True
@@ -977,9 +1017,41 @@ class InfinidevApp:
         self._ensure_engine()
         from infinidev.ui.workers import run_in_background, run_engine_task
 
-        run_in_background(
-            self, run_engine_task, self, user_input, attachments, exclusive=True,
+        args = (self, user_input, attachments)
+        if task_tools is not None:
+            args += (task_tools,)
+        run_in_background(self, run_engine_task, *args, exclusive=True)
+
+    def _handle_tool_request(self, text: str) -> None:
+        from infinidev.cli.tool_commands import (
+            describe_selection, describe_tools, parse_tool_request,
         )
+        from infinidev.engine.turns.catalog import freeze_task_tools, select_tool_names
+
+        if self._engine_running or self._context_admission_pending is not None:
+            self.add_message('System', 'Wait for the current task or admission decision.', 'system')
+            return
+        try:
+            request = None if text.strip() == '/tools' else parse_tool_request(text)
+            if self.agent is None:
+                self._ensure_engine()
+            if request is None:
+                self.add_message('System', describe_tools(self.agent.tools), 'system')
+                return
+            selected = freeze_task_tools(
+                self.agent.tools, select_tool_names(self.agent.tools, request.names))
+        except ValueError as exc:
+            self.add_message('System', str(exc), 'system')
+            return
+        attachments = self.attachment_tray.take_all()
+        self._actions_text = ''
+        self._task_description = request.body
+        self._touched_files = {}
+        self.add_message('You', request.body, 'user')
+        self.add_message('System', describe_selection(selected), 'system')
+        if self._request_context_admission(request.body, attachments, task_tools=selected):
+            return
+        self._start_engine_task(request.body, attachments, task_tools=selected)
 
     def _apply_autocomplete(self, cmd: str) -> None:
         """Apply an autocomplete selection to the chat input."""
@@ -1007,6 +1079,14 @@ class InfinidevApp:
             if lower in ("deny", "n", "no"):
                 self._resolve_permission(False)
                 return
+
+        if getattr(self, '_context_admission_pending', None) is not None:
+            self.add_message('System', 'Resolve or cancel the pending task first.', 'system')
+            return
+        from infinidev.cli.tool_commands import is_tools_command
+        if is_tools_command(user_text):
+            self._handle_tool_request(user_text)
+            return
 
         if not self._engine_running and user_text.strip():
             self._task_description = user_text.strip()

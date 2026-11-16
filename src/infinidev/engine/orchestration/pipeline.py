@@ -27,6 +27,7 @@ this file.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 from dataclasses import replace as _dc_replace
 import logging
 import os
@@ -34,6 +35,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.session_status import current_observer, observed_principal
+from infinidev.engine.turns.catalog import ToolGrant, freeze_task_tools
 from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 logger = logging.getLogger(__name__)
@@ -858,6 +860,7 @@ def run_task(
     attachments: list[Any] | None = None,
     autonomous: bool = False,
     prompt_configuration: EffectivePromptConfiguration | None = None,
+    task_tools: Sequence[Any] | None = None,
     _hook_reentry: bool = False,
     _autonomous_budget: Any = None,
 ) -> str:
@@ -891,6 +894,19 @@ def run_task(
     prompt_configuration = (
         prompt_configuration or EffectivePromptConfiguration.compile()
     )
+    from infinidev.config.settings import settings as _settings
+    from infinidev.engine.engines.routing import ENGINE_ORCHESTRATOR, normalize_mode
+
+    def uses_principal() -> bool:
+        return (normalize_mode(_settings.TASK_ENGINE_MODE) == "task"
+                and not autonomous and not use_phase_engine)
+
+    conversational = uses_principal() if task_tools is not None else None
+    if task_tools is not None and (
+        not conversational or force_gather or _settings.GATHER_ENABLED
+    ):
+        raise ValueError('Explicit tool grants require the principal without gather or phase modes')
+    tool_grant = freeze_task_tools(getattr(agent, 'tools', []) or [], task_tools)
     if reviewer is not None and hasattr(reviewer, "_prompt_configuration"):
         reviewer._prompt_configuration = prompt_configuration
 
@@ -1052,13 +1068,11 @@ def run_task(
     # activate_context would have written.
     if agent_project_id is None:
         agent_project_id = getattr(agent, "project_id", None)
-    from infinidev.config.settings import settings as _settings
-    from infinidev.engine.engines.routing import ENGINE_ORCHESTRATOR, normalize_mode
+    if conversational is None:
+        from infinidev.config.settings import settings as _settings
+        from infinidev.engine.engines.routing import ENGINE_ORCHESTRATOR, normalize_mode
 
-    conversational = (
-        normalize_mode(_settings.TASK_ENGINE_MODE) == "task"
-        and not autonomous and not use_phase_engine
-    )
+        conversational = uses_principal()
     target_repository = (
         (getattr(ctx, "repository_path", None) or agent_workspace)
         if conversational else resolve_referenced_repository(user_input, agent_workspace)
@@ -1104,7 +1118,7 @@ def run_task(
         turn_context = _join_blocks(
             render_session_context(session_id, user_input), turn_context,
         )
-        if force_gather or _settings.GATHER_ENABLED:
+        if tool_grant is None and (force_gather or _settings.GATHER_ENABLED):
             gathered, _ = _run_gather_phase(
                 user_input=user_input, agent=agent, task_prompt=("", ""),
                 session_id=session_id, force_gather=force_gather, hooks=hooks,
@@ -1118,6 +1132,7 @@ def run_task(
             repository_path=target_repository,
             workspace_path=agent_workspace,
             prompt_configuration=prompt_configuration, skip_instruction=_hook_reentry,
+            tool_grant=tool_grant,
         )
 
     root_task = runtime.add_task(
@@ -1515,6 +1530,7 @@ def _run_principal_turn(
     runtime: Any, repository_path: str | None,
     prompt_configuration: EffectivePromptConfiguration, skip_instruction: bool,
     workspace_path: str | None = None,
+    tool_grant: ToolGrant | None = None,
 ) -> str:
     """Close a conversational turn without creating or advancing work Tasks."""
     from infinidev.config.settings import settings
@@ -1581,6 +1597,10 @@ def _run_principal_turn(
             if getattr(engine, "is_cancelled", False):
                 status, result = "cancelled", "Conversation cancelled."
                 break
+            selected = {}
+            if tool_grant is not None:
+                tool_grant.validate()
+                selected['task_tools'] = list(tool_grant.tools)
             turn = engine.run_turn(
                 agent, user_input, turn_context=turn_context,
                 _parent_guidance=parent_guidance,
@@ -1590,6 +1610,7 @@ def _run_principal_turn(
                 prompt_configuration=prompt_configuration,
                 preserve_file_tracker=bool(pass_index),
                 on_public_message=publish,
+                **selected,
             )
             valid = (
                 isinstance(turn, TurnResult)

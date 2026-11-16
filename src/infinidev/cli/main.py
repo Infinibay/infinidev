@@ -551,6 +551,10 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
     (action-verb prompts like "refactor X" or "create Y") skip the
     analyst, which historically wrapped them in an "analyze only" envelope
     and made the loop run in circles."""
+    from infinidev.cli.tool_commands import is_tools_command
+
+    if is_tools_command(prompt_text):
+        raise ValueError('/tools requires an interactive frontend or SDK task_tools')
     from infinidev.engine.orchestration import (
         run_task, run_flow_task, NonInteractiveHooks,
     )
@@ -817,6 +821,10 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
         render_status_table, hr, run_with_live_status,
     )
     from prompt_toolkit.patch_stdout import patch_stdout
+    from infinidev.cli.tool_commands import (
+        ToolRequest, describe_selection, describe_tools, is_tools_command,
+    )
+    from infinidev.engine.turns.catalog import freeze_task_tools, select_tool_names
     from prompt_toolkit.key_binding import KeyBindings
 
     # ── Session state + renderer ─────────────────────────────────────
@@ -928,10 +936,20 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                 continue
 
             _fallthrough_to_pipeline = False
-            if user_input.startswith("/"):
+            task_tools = None
+            if user_input.startswith("/") or is_tools_command(user_input):
                 cmd_result = handle_command(user_input, session_id=session_id)
 
-                if isinstance(cmd_result, tuple) and cmd_result[0] == "prompt":
+                if isinstance(cmd_result, ToolRequest):
+                    task_tools = freeze_task_tools(
+                        agent.tools, select_tool_names(agent.tools, cmd_result.names))
+                    user_input = cmd_result.body
+                    _fallthrough_to_pipeline = True
+                    click.echo(describe_selection(task_tools))
+                elif cmd_result == 'tools':
+                    click.echo(describe_tools(agent.tools))
+                    continue
+                elif isinstance(cmd_result, tuple) and cmd_result[0] == "prompt":
                     user_input = cmd_result[1]
                     _fallthrough_to_pipeline = True
 
@@ -1015,6 +1033,7 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                     hooks=hooks,
                     use_phase_engine=_use_phase_engine,
                     force_gather=_gather_next_task,
+                    **({'task_tools': task_tools} if task_tools is not None else {}),
                 ),
                 status,
                 permission_queue=pq,

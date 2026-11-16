@@ -57,6 +57,10 @@ def create_context_admission_dialog(app_state: InfinidevApp) -> Float:
         left_symbol="[",
         right_symbol="]",
     )
+    cancel_button = Button(
+        'Cancel task', handler=lambda: app_state._cancel_context_admission(), width=16,
+        left_symbol='[', right_symbol=']',
+    )
     buttons = [
         Window(),
         compact_button,
@@ -64,10 +68,17 @@ def create_context_admission_dialog(app_state: InfinidevApp) -> Float:
             content=VSplit([Window(width=2), replacement_button]),
             filter=Condition(lambda: bool(state().get("replacement_model"))),
         ),
+        ConditionalContainer(
+            content=VSplit([Window(width=2), cancel_button]),
+            filter=Condition(lambda: bool(
+                getattr(app_state, '_context_admission_pending', None)
+                and len(app_state._context_admission_pending) == 3)),
+        ),
         Window(),
     ]
     app_state._context_admission_compact_button = compact_button
     app_state._context_admission_switch_button = replacement_button
+    app_state._context_admission_cancel_button = cancel_button
 
     body = HSplit([
         Window(

@@ -13,6 +13,8 @@ import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable
 
+from infinidev.engine.turns.catalog import ToolGrant
+
 if TYPE_CHECKING:
     from infinidev.ui.app import InfinidevApp
 
@@ -56,6 +58,7 @@ def run_engine_task(
     app: InfinidevApp,
     user_input: str,
     attachments: list | None = None,
+    task_tools: ToolGrant | None = None,
 ) -> None:
     """Run the main engine pipeline in a background thread.
 
@@ -107,6 +110,7 @@ def run_engine_task(
                 hooks=hooks,
                 force_gather=force_gather,
                 attachments=attachments,
+                **({'task_tools': task_tools} if task_tools is not None else {}),
             )
         finally:
             app.agent.deactivate()

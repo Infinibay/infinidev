@@ -27,6 +27,11 @@ def handle_command(app: InfinidevApp, cmd_text: str) -> None:
         getattr(app, "_engine_running", None),
     )
 
+    from infinidev.cli.tool_commands import is_tools_command
+
+    if is_tools_command(cmd_text):
+        _COMMAND_TABLE['/tools'](app, cmd_text)
+        return
     parts = cmd_text.split()
     cmd = parts[0].lower()
 
@@ -82,6 +87,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "\n"
         "COMMANDS\n"
         "  /models [list|set|manage]    Show or change the model\n"
+        "  /tools [run names -- task]   Select tools for one literal task\n"
         "  /prompts                     List optional capabilities\n"
         "  /prompts search <term>       Find capabilities by name or condition\n"
         "  /prompts show <name>         Preview capability guidance\n"
@@ -614,7 +620,12 @@ def _cmd_mcp(app: InfinidevApp, parts: list[str]) -> None:
 
 # ── Command dispatch table ──────────────────────────────────────────────
 
+def _cmd_tools(app: InfinidevApp, raw_command: str) -> None:
+    app._handle_tool_request(raw_command)
+
+
 _COMMAND_TABLE: dict[str, Any] = {
+    '/tools': _cmd_tools,
     "/mcp": _cmd_mcp,
     "/sidebar": _cmd_sidebar,
     "/panel": _cmd_sidebar,

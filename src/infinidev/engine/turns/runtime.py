@@ -34,6 +34,7 @@ from infinidev.engine.multimodal import build_user_content, mention_paths_as_tex
 from infinidev.engine.session_status import current_observer
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call, tool_to_openai_schema
 from infinidev.engine.tool_executor import capture_pre_content, maybe_emit_file_change
+from infinidev.engine.turns.catalog import effective_tools
 from infinidev.engine.turns.models import TurnResult, TurnState
 from infinidev.engine.turns.tools import build_turn_tools
 from infinidev.engine.workspace_baseline import WorkspaceBaseline
@@ -46,10 +47,6 @@ from infinidev.tools.base.context import (
 
 logger = logging.getLogger(__name__)
 
-_LEGACY_TOOLS = frozenset({
-    'step_complete', 'add_step', 'modify_step', 'remove_step', 'escalate',
-    'respond', 'continue_investigation',
-})
 _PROTOCOL = """You own this conversation. Interpret the literal current user message using the
 provided context and available tools. Answer, ask a question, investigate, edit, or delegate
 as appropriate. A plain final response or finish_turn(message) returns control to the user;
@@ -419,8 +416,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         manual = not capabilities.supports_function_calling
         vision = bool(getattr(capabilities, 'supports_vision', False))
         tools = list(task_tools if task_tools is not None else getattr(agent, 'tools', []) or [])
-        tools = [tool for tool in tools if tool.name not in _LEGACY_TOOLS
-                 and tool.name not in {'finish_turn', 'update_plan'}]
+        tools = effective_tools(tools)
         tools.extend(build_turn_tools(state))
         bind_tools_to_agent(tools, agent.agent_id)
         schemas = [tool_to_openai_schema(tool) for tool in tools]

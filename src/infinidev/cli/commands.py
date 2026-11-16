@@ -23,6 +23,17 @@ def handle_command(cmd_text: str, session_id: str | None = None):
     """Handle / commands for the active classic session."""
     parts = cmd_text.split()
     cmd = parts[0].lower()
+
+    if cmd == '/tools':
+        from infinidev.cli.tool_commands import parse_tool_request
+
+        if cmd_text.strip() == '/tools':
+            return 'tools'
+        try:
+            return parse_tool_request(cmd_text)
+        except ValueError as exc:
+            click.echo(click.style(str(exc), fg='red'))
+            return True
     
     if cmd == "/prompts":
         from infinidev.prompts.commands import handle_prompts_command
@@ -132,6 +143,7 @@ def handle_command(cmd_text: str, session_id: str | None = None):
     elif cmd == "/help":
         click.echo(click.style("Available commands:", bold=True))
         click.echo("  /models            - Show current model configuration")
+        click.echo("  /tools             - List tools; /tools run [names] -- <task>")
         click.echo("  /prompts           - List optional prompt capabilities")
         click.echo("  /prompts search <term> - Find capabilities by name or activation condition")
         click.echo("  /prompts show <name> - Preview a capability before enabling it")

@@ -15,6 +15,7 @@ from infinidev.ui.theme import TEXT, TEXT_MUTED, PRIMARY, ACCENT, SURFACE_LIGHT
 # Commands list — imported from tui.py's COMMANDS
 COMMANDS = [
     ("/models", "Show current model configuration"),
+    ("/tools", "List tools; /tools run [names] -- task selects tools for one task"),
     ("/models list", "List available Ollama models"),
     ("/models set", "Change Ollama model (e.g., /models set llama3)"),
     ("/models manage", "Pick a model interactively"),
