@@ -4,7 +4,7 @@ import json
 import os
 import re
 import shlex
-from typing import Type
+from typing import Any, Type
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,31 @@ from infinidev.tools.file.code_search_input import CodeSearchInput
 def _shell_quote(s: str) -> str:
     """Quote a string for safe shell usage."""
     return shlex.quote(s)
+
+
+def _limited(metadata: dict[str, Any], reason: str, *, unknown: bool = False) -> None:
+    if reason not in metadata["reasons"]:
+        metadata["reasons"].append(reason)
+    if unknown or metadata["coverage"] == "unknown":
+        metadata["coverage"] = "unknown"
+    else:
+        metadata["coverage"] = "limited"
+
+
+def _record_process(metadata: dict[str, Any], result: Any, *, aggregate: bool = False) -> None:
+    """Record mechanical backend facts without interpreting diagnostic prose."""
+    metadata["backend_exit_code"] = result.exit_code
+    if result.stderr:
+        metadata["backend_stderr"] = result.stderr[:2000]
+        metadata["backend_stderr_truncated"] = len(result.stderr) > 2000
+        _limited(metadata, "backend_stderr")
+    if result.exit_code == 123:
+        _limited(metadata, "aggregate_exit" if aggregate else "backend_exit_uncertain",
+                 unknown=True)
+    if result.exit_code in (1, 123) and result.stdout:
+        _limited(metadata, "omitted_output", unknown=True)
+    if getattr(result, "timed_out", False):
+        _limited(metadata, "backend_timeout", unknown=True)
 
 
 class CodeSearchTool(InfinibayBaseTool):
@@ -55,12 +80,49 @@ class CodeSearchTool(InfinibayBaseTool):
         context_lines: int = 0,
         max_depth: int | None = None,
     ) -> str:
+        metadata: dict[str, Any] = {
+            "schema_version": 1, "outcome": "error", "mode": "regex",
+            "backend": "unknown", "dialect": "unknown", "scope": "unknown",
+            "root": None, "coverage": "unknown", "filters_applied": {}, "reasons": [],
+        }
+        body = self._run_search(pattern, file_path, file_extensions, case_sensitive,
+                                max_results, context_lines, max_depth, _metadata=metadata)
+        payload = json.loads(body)
+        if "error" in payload:
+            if metadata["outcome"] != "unavailable":
+                metadata["outcome"] = "error"
+            metadata["coverage"] = "unknown"
+        else:
+            if payload["truncated"]:
+                _limited(metadata, "result_limit")
+            metadata["outcome"] = (
+                "partial" if metadata["coverage"] != "completed_scope"
+                else "matches" if payload["match_count"] else "empty")
+        payload["search_metadata"] = metadata
+        return json.dumps(payload)
+
+    def _run_search(
+        self,
+        pattern: str = "",
+        file_path: str = ".",
+        file_extensions: list[str] | None = None,
+        case_sensitive: bool = True,
+        max_results: int = 50,
+        context_lines: int = 0,
+        max_depth: int | None = None,
+        *,
+        _metadata: dict[str, Any],
+    ) -> str:
         file_path = self._resolve_path(os.path.expanduser(file_path))
+        _metadata["root"] = file_path
 
         if self._is_pod_mode():
+            _metadata.update(backend="pod_helper", mode="unknown", scope="remote_unknown",
+                             filters_applied=None)
+            _metadata["reasons"].append("remote_metadata_unknown")
             return self._run_in_pod(
                 pattern, file_path, file_extensions, case_sensitive,
-                max_results, context_lines,
+                max_results, context_lines, _metadata=_metadata,
             )
 
         # Sandbox check (resolves symlinks, enforces directory boundaries)
@@ -69,6 +131,10 @@ class CodeSearchTool(InfinibayBaseTool):
             return self._error(sandbox_err)
 
         if os.path.isfile(file_path):
+            _metadata.update(backend="python_re", dialect="python", scope="file",
+                             coverage="completed_scope", filters_applied={
+                                 "case_sensitive": case_sensitive,
+                                 "max_results": max_results, "context_lines": context_lines})
             return self._search_single_file(
                 pattern,
                 file_path,
@@ -82,6 +148,23 @@ class CodeSearchTool(InfinibayBaseTool):
         # Prefer git grep when inside a git repo — it respects .gitignore
         # and skips untracked build artifacts automatically.
         use_git_grep = self._has_git(file_path)
+        _metadata.update(backend="git_grep" if use_git_grep else "grep", dialect="ere",
+                         scope="directory", coverage="completed_scope", filters_applied={
+                             "file_extensions": [ext if ext.startswith(".") else f".{ext}"
+                                                 for ext in file_extensions] if file_extensions else None,
+                             "max_depth": max_depth, "case_sensitive": case_sensitive,
+                             "max_results": max_results, "context_lines": context_lines,
+                             "excludes": "git_defaults" if use_git_grep else "grep_defaults"})
+        if use_git_grep and max_depth is not None and file_extensions:
+            # Git documents wildcard pathspecs as an exception to --max-depth;
+            # effectiveness differs from merely supplying the flag.
+            _metadata["filters_applied"]["max_depth"] = None
+            _limited(_metadata, "git_depth_with_pathspec_uncertain", unknown=True)
+        elif not use_git_grep and max_depth is not None:
+            # find supplies files directly, so grep's recursive directory
+            # exclusions do not prune their parent directories.
+            _metadata["filters_applied"]["excludes"] = None
+            _limited(_metadata, "directory_exclusions_not_applied", unknown=True)
 
         if use_git_grep:
             # Include non-ignored untracked files: an editor or coding agent
@@ -146,7 +229,9 @@ class CodeSearchTool(InfinibayBaseTool):
                         timeout=30,
                     )
                 except OSError:
+                    _metadata["outcome"] = "unavailable"
                     return self._error("grep is not installed or not in PATH")
+                _record_process(_metadata, result, aggregate=True)
                 if result.timed_out:
                     return self._error("Search timed out (pattern may be too broad)")
 
@@ -171,9 +256,11 @@ class CodeSearchTool(InfinibayBaseTool):
                     timeout=30,
                 )
             except OSError:
+                _metadata["outcome"] = "unavailable"
                 return self._error(
                     "git/grep is not installed or not in PATH"
                 )
+            _record_process(_metadata, result)
             if result.timed_out:
                 return self._error("Search timed out (pattern may be too broad)")
 
@@ -194,6 +281,7 @@ class CodeSearchTool(InfinibayBaseTool):
         # Parse matches (skip context separator lines "--")
         matches = []
         hit_cap = False
+        unparsed = 0
         for line in lines:
             if line == "--":
                 continue
@@ -201,6 +289,7 @@ class CodeSearchTool(InfinibayBaseTool):
             # Use partition to handle colons in content
             first_sep = line.find(":")
             if first_sep == -1:
+                unparsed += 1
                 continue
             file_part = line[:first_sep]
             rest = line[first_sep + 1:]
@@ -209,6 +298,7 @@ class CodeSearchTool(InfinibayBaseTool):
                 # Context line (uses - separator)
                 second_sep = rest.find("-")
                 if second_sep == -1:
+                    unparsed += 1
                     continue
             line_num_str = rest[:second_sep]
             content = rest[second_sep + 1:]
@@ -216,6 +306,7 @@ class CodeSearchTool(InfinibayBaseTool):
             try:
                 line_num = int(line_num_str)
             except ValueError:
+                unparsed += 1
                 continue
 
             matches.append({
@@ -233,6 +324,9 @@ class CodeSearchTool(InfinibayBaseTool):
         # also contains context lines (context_lines>0) and "--" group
         # separators, so it reported truncated=True for complete results.
         truncated = hit_cap
+        if unparsed:
+            _metadata["unparsed_output_lines"] = unparsed
+            _limited(_metadata, "unparsed_output", unknown=True)
 
         self._log_tool_usage(
             f"Searched '{pattern}' in {file_path} — {len(matches)} matches"
@@ -304,6 +398,8 @@ class CodeSearchTool(InfinibayBaseTool):
         case_sensitive: bool,
         max_results: int,
         context_lines: int,
+        *,
+        _metadata: dict[str, Any] | None = None,
     ) -> str:
         """Search code via infinibay-file-helper inside the pod."""
         req = {
@@ -326,6 +422,8 @@ class CodeSearchTool(InfinibayBaseTool):
         except RuntimeError as e:
             return self._error(f"Pod execution failed: {e}")
 
+        if _metadata is not None:
+            _record_process(_metadata, result)
         if result.exit_code != 0:
             return self._error(f"File helper error: {result.stderr.strip()}")
 
