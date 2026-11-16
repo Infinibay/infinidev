@@ -891,7 +891,7 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
     _use_phase_engine = False
 
     # Inline permission handler — bridges engine worker thread → main.
-    pq = PermissionQueue()
+    pq = PermissionQueue(is_cancelled=lambda: engine.is_cancelled)
     set_permission_handler(make_permission_handler(pq))
 
     def _drain_permission_requests() -> None:
@@ -908,11 +908,11 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                 click.echo(click.style(f"  {req.details}", fg="yellow"))
             try:
                 ans = session.prompt("  Allow? [y/N] ").strip().lower()
-                req.result = ans in ("y", "yes")
+                req.resolve(ans in ("y", "yes"))
             except (EOFError, KeyboardInterrupt):
-                req.result = False
+                req.resolve(False)
             finally:
-                req.done.set()
+                req.resolve(False)
 
     # ── REPL loop ────────────────────────────────────────────────────
     while True:
@@ -947,6 +947,7 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                             use_tree_engine=True,
                         ),
                         status,
+                        permission_queue=pq,
                     )
                     _drain_permission_requests()
                     click.echo(click.style(f"\n{flow_name.title()} Result:", bold=True))
@@ -968,6 +969,7 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                             session_id=session_id, engine=engine, hooks=hooks,
                         ),
                         status,
+                        permission_queue=pq,
                     )
                     _drain_permission_requests()
                     click.echo(click.style("\nInit Result:", bold=True))
@@ -1015,6 +1017,7 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                     force_gather=_gather_next_task,
                 ),
                 status,
+                permission_queue=pq,
             )
             _drain_permission_requests()
             _gather_next_task = False

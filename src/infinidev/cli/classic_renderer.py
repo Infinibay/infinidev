@@ -27,7 +27,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from infinidev.flows.event_listeners import event_bus
 
@@ -405,31 +405,73 @@ class _PermissionRequest:
     details: str
     result: bool = False
     done: threading.Event = field(default_factory=threading.Event)
+    _lock: Any = field(default_factory=threading.Lock, repr=False)
+
+    def resolve(self, approved: bool) -> None:
+        """Settle once so stale UI input cannot approve a cancelled request."""
+        with self._lock:
+            if not self.done.is_set():
+                self.result = approved
+                self.done.set()
 
 
 class PermissionQueue:
     """Thread-safe queue for tool-permission round-trips.
 
     The engine's worker thread submits a request via ``request()`` and
-    blocks on its ``done`` event. The CLI main thread drains the queue
-    between renders, prompts the user, and resolves the event.
+    waits for its ``done`` event or cancellation. The active CLI application
+    services requests while the worker runs; the outer prompt can also drain
+    requests after a task returns.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, is_cancelled: Callable[[], bool] | None = None) -> None:
         self._q: queue.Queue[_PermissionRequest] = queue.Queue()
+        self._is_cancelled = is_cancelled or (lambda: False)
+        self._waiting: dict[int, _PermissionRequest] = {}
+        self._waiting_lock = threading.Lock()
 
     def request(self, tool_name: str, description: str, details: str) -> bool:
         req = _PermissionRequest(tool_name, description, details)
-        self._q.put(req)
-        # Block worker thread until main thread resolves.
-        req.done.wait()
-        return req.result
+        # Cancellation must reach claimed requests and producers paused before
+        # enqueue, even if the engine's flag is reset for a later turn.
+        with self._waiting_lock:
+            self._waiting[id(req)] = req
+        try:
+            if self._is_cancelled():
+                req.resolve(False)
+                return False
+            self._q.put(req)
+            while not req.done.wait(timeout=0.05):
+                if self._is_cancelled():
+                    req.resolve(False)
+            return req.result and not self._is_cancelled()
+        finally:
+            req.resolve(False)
+            with self._waiting_lock:
+                self._waiting.pop(id(req), None)
 
     def pending(self) -> _PermissionRequest | None:
-        try:
-            return self._q.get_nowait()
-        except queue.Empty:
-            return None
+        while True:
+            try:
+                request = self._q.get_nowait()
+            except queue.Empty:
+                return None
+            if self._is_cancelled():
+                request.resolve(False)
+            if not request.done.is_set():
+                return request
+
+    def deny_pending(self) -> None:
+        """Settle all registered waiters, including those not in the queue."""
+        with self._waiting_lock:
+            waiting = list(self._waiting.values())
+        for request in waiting:
+            request.resolve(False)
+        while True:
+            request = self.pending()
+            if request is None:
+                return
+            request.resolve(False)
 
 
 def make_permission_handler(pq: PermissionQueue):
@@ -628,6 +670,7 @@ def run_with_live_status(
     engine: Any,
     task_callable,
     status: SessionStatus,
+    *, permission_queue: PermissionQueue | None = None,
 ):
     """Run ``task_callable()`` in a worker thread while a tiny
     ``prompt_toolkit.Application`` keeps the bottom toolbar live.
@@ -650,9 +693,11 @@ def run_with_live_status(
     Returns the worker's return value, or re-raises its exception.
     """
     from prompt_toolkit.application import Application
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.filters import Condition
     from prompt_toolkit.layout import Layout
-    from prompt_toolkit.layout.containers import HSplit, Window
-    from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.layout.containers import ConditionalContainer, HSplit, Window
+    from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
     from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.patch_stdout import patch_stdout
@@ -661,7 +706,34 @@ def run_with_live_status(
     result_holder: list = []
     error_holder: list[BaseException] = []
     cancel_state = {"presses": 0, "last_press": 0.0}
+    active_permission: _PermissionRequest | None = None
+    answer = Buffer(multiline=False)
+    answer_control = BufferControl(buffer=answer)
+    permission_visible = Condition(lambda: active_permission is not None)
     status.run_started_at = time.monotonic()
+
+    def deny_permissions() -> None:
+        nonlocal active_permission
+        if active_permission is not None:
+            active_permission.resolve(False)
+            active_permission = None
+        if permission_queue is not None:
+            permission_queue.deny_pending()
+
+    def service_permissions(app) -> None:
+        nonlocal active_permission
+        if permission_queue is None:
+            return
+        if getattr(engine, "is_cancelled", False):
+            deny_permissions()
+            return
+        if active_permission is not None and active_permission.done.is_set():
+            active_permission = None
+        if active_permission is None:
+            active_permission = permission_queue.pending()
+            if active_permission is not None:
+                answer.reset()
+                app.layout.focus(answer_control)
 
     def _worker() -> None:
         try:
@@ -672,7 +744,6 @@ def run_with_live_status(
             done.set()
 
     t = threading.Thread(target=_worker, daemon=True)
-    t.start()
 
     kb = KeyBindings()
 
@@ -689,6 +760,27 @@ def run_with_live_status(
             engine.cancel()
         except Exception:
             pass
+        deny_permissions()
+
+    @kb.add("enter", filter=permission_visible)
+    def accept_permission(event):
+        nonlocal active_permission
+        if active_permission is not None:
+            approved = (answer.text.strip().lower() in ("y", "yes")
+                        and not getattr(engine, "is_cancelled", False))
+            active_permission.resolve(approved)
+            active_permission = None
+            answer.reset()
+            event.app.invalidate()
+
+    @kb.add("c-d", filter=permission_visible)
+    def deny_permission(event):
+        nonlocal active_permission
+        if active_permission is not None:
+            active_permission.resolve(False)
+            active_permission = None
+            answer.reset()
+            event.app.invalidate()
 
     def _working_line():
         if status.run_started_at is not None:
@@ -696,29 +788,50 @@ def run_with_live_status(
         else:
             elapsed = 0
         suffix = " — Ctrl+C to cancel"
-        if cancel_state["presses"] >= 1:
+        if active_permission is not None:
+            label = "awaiting approval"
+        elif cancel_state["presses"] >= 1:
             label = f"cancelling… ({elapsed}s)"
         else:
             label = f"working… ({elapsed}s)"
         return FormattedText([("class:tb.working", f"  {label}{suffix}")])
 
-    layout = Layout(HSplit([
-        Window(content=FormattedTextControl(text=_working_line), height=1),
-        Window(
-            content=FormattedTextControl(text=make_status_renderer(status)),
-            height=1,
-            style="class:bottom-toolbar",
-        ),
-    ]))
+    def permission_text():
+        if active_permission is None:
+            return ""
+        return (f"Permission required: {active_permission.description}\n"
+                f"{active_permission.details}\nAllow? [y/N] (Enter to confirm)")
 
-    app = Application(
-        layout=layout,
-        key_bindings=kb,
-        style=status_bar_style(),
-        full_screen=False,
-        refresh_interval=0.5,
-        mouse_support=False,
-    )
+    try:
+        layout = Layout(HSplit([
+            Window(content=FormattedTextControl(text=_working_line), height=1),
+            ConditionalContainer(Window(FormattedTextControl(permission_text), wrap_lines=True),
+                                 filter=permission_visible),
+            ConditionalContainer(Window(answer_control, height=1), filter=permission_visible),
+            Window(
+                content=FormattedTextControl(text=make_status_renderer(status)),
+                height=1,
+                style="class:bottom-toolbar",
+            ),
+        ]))
+
+        app = Application(
+            layout=layout,
+            key_bindings=kb,
+            style=status_bar_style(),
+            full_screen=False,
+            refresh_interval=0.5,
+            mouse_support=False,
+            before_render=service_permissions,
+        )
+    except BaseException:
+        try:
+            engine.cancel()
+        except Exception:
+            pass
+        deny_permissions()
+        status.run_started_at = None
+        raise
 
     def _waiter() -> None:
         done.wait()
@@ -729,8 +842,6 @@ def run_with_live_status(
         except Exception:
             pass
 
-    threading.Thread(target=_waiter, daemon=True).start()
-
     def _on_start() -> None:
         # A fast chat reply can finish before app.loop exists, so the waiter
         # cannot wake it. Check again on the UI thread after startup.
@@ -738,18 +849,22 @@ def run_with_live_status(
             app.exit()
 
     try:
+        t.start()
+        threading.Thread(target=_waiter, daemon=True).start()
         with patch_stdout(raw=True):
             app.run(pre_run=_on_start)
-    except KeyboardInterrupt:
+    except BaseException:
         # Force-exit path: tell engine to cancel and wait for the
         # worker to wind down so we don't leak partial state.
         try:
             engine.cancel()
         except Exception:
             pass
+        deny_permissions()
         done.wait(timeout=10.0)
         raise
     finally:
+        deny_permissions()
         status.run_started_at = None
 
     if error_holder:
