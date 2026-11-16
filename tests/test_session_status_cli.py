@@ -46,3 +46,43 @@ def test_deeply_nested_record_is_unknown_in_standalone_reader(tmp_path):
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["state"] == "unknown"
+
+
+def test_tool_results_opt_in_requires_explicit_run(tmp_path):
+    result = subprocess.run([sys.executable, '-m', 'infinidev.cli.status', '--workspace',
+                             str(tmp_path), '--session', 'session', '--tool-results'],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 2
+    assert '--tool-results requires --run' in result.stderr
+
+
+def test_tool_results_opt_in_does_not_bootstrap_settings_or_model(tmp_path):
+    import sqlite3
+
+    directory = tmp_path / '.infinidev'
+    directory.mkdir()
+    conn = sqlite3.connect(directory / 'infinidev.db')
+    conn.execute('CREATE TABLE working_memory '
+                 '(session_id TEXT, kind TEXT, content TEXT, created_at TEXT)')
+    conn.close()
+    source = '''
+import importlib.abc
+import sys
+class RejectHeavy(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {'infinidev.cli.main','infinidev.config.settings'} or fullname.startswith((
+            'infinidev.db','infinidev.server','litellm','textual','infinidev.tools')):
+            raise AssertionError('unexpected bootstrap: '+fullname)
+sys.meta_path.insert(0, RejectHeavy())
+from infinidev.cli.entry import main
+sys.argv = ['infinidev','status','--workspace',sys.argv[1],'--session','session',
+            '--run','a'*32,'--tool-results']
+main()
+'''
+    result = subprocess.run([sys.executable, '-c', source, str(tmp_path)],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data['tool_results']['state'] == 'unavailable'
+    assert data['state'] == 'unknown'
+    assert sorted(path.name for path in directory.iterdir()) == ['infinidev.db']

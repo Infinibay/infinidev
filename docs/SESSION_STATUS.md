@@ -55,3 +55,56 @@ different owner files. A stalled prior writer receives no authority over the nex
 turn's file. Publication runs on a daemon thread and leaving the scope waits at
 most 250 ms; failed I/O does not change the task result. These are local workspace
 observations, not a cross-user authorization service or a durable event stream.
+
+## Optional retained tool-result observation
+
+```sh
+uv run infinidev status --workspace /path/to/project --session SESSION_ID \
+  --run CHILD_RUN_ID --tool-results
+```
+
+`--tool-results` requires an explicit child `--run` and adds a separate
+`tool_results` member. Without the flag the file-only status command and JSON
+remain unchanged. The additional reader opens only the existing workspace
+`.infinidev/infinidev.db`; it does not load settings to find a configured alternate
+DB. It loads no agent, tool registry or model and creates/migrates no application
+state. Its SQLite connection uses `mode=ro`, query-only mode and a read snapshot;
+normal SQLite/WAL locking still applies. It does not use `immutable`, which could
+ignore live WAL changes, or the writable connection pool.
+
+The observation reports the latest result, counts per tool and distinct output
+hashes, occurrences of the latest `(tool, output_sha256)` pair, the trailing streak
+of that pair, and the last different result within the window. Streaks count tool
+results, ignoring intervening model/request events. They do not inspect or expose
+arguments, commands, messages, reasoning or tool-result bodies. The fingerprint
+version names the runtime's recorded SHA256 of UTF-8 returned tool text. These
+hashes are not recomputed against archives; equal hashes are evidence about the
+recorded bytes, not successful work, freshness, complete payloads, identical
+arguments or redundant intent. Error and payload completeness semantics are not
+inspected. In particular a repeated result can be an error, partial page or valid
+poll, and no cancellation, model feedback or execution limit follows from it.
+
+The reader scans at most 4096 recent retained runtime-trace rows for the exact
+session, then selects the exact run and keeps at most 512 tool-result rows.
+Persistence order is SQLite rowid, not wall-clock timestamps. Coverage always
+says `retained_window` and `history_complete=false`: traces may have been pruned,
+previous children are outside this run, and no match in a bounded window does not
+prove the run never happened. `scan_clipped` and `results_clipped` describe the
+two explicit windows. An observed window can have zero results; unavailable data
+instead has `state=unavailable` and `results=null`. Missing/busy/corrupt databases,
+unsupported schemas, invalid traces or exceeded SQL budgets never become zero
+results. A corrupt/oversized trace in the scanned session window makes the
+observation unavailable even when its run cannot be identified safely.
+
+Each trace JSON input is bounded to 16 KiB before projection, and the connection
+has a 128 KiB SQLite value limit. The shared DB helper's opt-in `read_only=True`
+path performs one attempt with a 50 ms busy timeout, two million SQL VM steps and
+a 250 ms cooperative time budget, rejecting expired results. Filesystem calls
+and individual SQLite operations are not a portable hard real-time deadline.
+Only allowlisted metadata fields leave SQLite. No raw bodies are materialized in
+Python, and metadata string/primitive types are checked before publication.
+
+`closure` is a retained child closure when observed, not the parent final message
+or proof of current idle. This member never changes the existing status state,
+owner selection, freshness or restart authority. It can be useful when the named
+file observation is already historical; supervisors must inspect both scopes.

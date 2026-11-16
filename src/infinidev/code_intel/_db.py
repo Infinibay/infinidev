@@ -11,6 +11,7 @@ compatibility with the rest of the codebase.
 """
 
 import logging
+from pathlib import Path
 import random
 import re
 import sqlite3
@@ -18,11 +19,42 @@ import threading
 import time
 from typing import Any, Callable, TypeVar
 
-from infinidev.config.settings import settings
-
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+_READ_ONLY_SECONDS = 0.25
+_READ_ONLY_STEPS = 2_000_000
+
+
+def _execute_read_only(fn: Callable[[sqlite3.Connection], T], db_path: str) -> T:
+    """One bounded observation, without pooling, settings, migration or WAL setup."""
+    deadline = time.monotonic() + _READ_ONLY_SECONDS
+    interval = min(1000, max(1, _READ_ONLY_STEPS))
+    steps = 0
+
+    def exhausted() -> bool:
+        nonlocal steps
+        steps += interval
+        return steps >= _READ_ONLY_STEPS or time.monotonic() >= deadline
+
+    conn = sqlite3.connect(Path(db_path).absolute().as_uri() + "?mode=ro",
+                           uri=True, timeout=0.05)
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 128 * 1024)
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("PRAGMA trusted_schema=OFF")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.set_progress_handler(exhausted, interval)
+        conn.execute("BEGIN")
+        if time.monotonic() >= deadline:
+            raise sqlite3.OperationalError("read-only observation budget exhausted")
+        result = fn(conn)
+        if time.monotonic() >= deadline:
+            raise sqlite3.OperationalError("read-only observation budget exhausted")
+        return result
+    finally:
+        conn.close()
 
 
 def _new_connection(db_path: str) -> sqlite3.Connection:
@@ -55,6 +87,8 @@ _conn_cache = threading.local()
 def get_pooled_connection(db_path: str | None = None) -> sqlite3.Connection:
     """Return a thread-local cached connection, opening one if needed."""
     if db_path is None:
+        from infinidev.config.settings import settings
+
         db_path = settings.DB_PATH
 
     cached: sqlite3.Connection | None = getattr(_conn_cache, "conn", None)
@@ -75,6 +109,8 @@ def get_connection(db_path: str | None = None) -> sqlite3.Connection:
 
 def get_db_path() -> str:
     """Get database path from settings."""
+    from infinidev.config.settings import settings
+
     return settings.DB_PATH
 
 
@@ -83,8 +119,21 @@ def execute_with_retry(
     db_path: str | None = None,
     max_retries: int | None = None,
     base_delay: float | None = None,
+    *,
+    read_only: bool = False,
 ) -> T:
-    """Execute fn(conn) with exponential backoff retry."""
+    """Retry writes; read_only uses one bounded, isolated, non-creating snapshot.
+
+    Read-only observations require an explicit path and do not use retry settings
+    or the writable pool. The caller must keep its SELECT and result size bounded.
+    """
+    if read_only:
+        if db_path is None:
+            raise ValueError("read_only requires an explicit database path")
+        return _execute_read_only(fn, db_path)
+
+    from infinidev.config.settings import settings
+
     if db_path is None:
         db_path = settings.DB_PATH
     if max_retries is None:
@@ -154,7 +203,7 @@ def execute_with_retry(
 class DBConnection:
     """Context manager for database connections."""
     def __init__(self, db_path: str | None = None):
-        self._db_path = db_path or settings.DB_PATH
+        self._db_path = db_path or get_db_path()
         self._conn: sqlite3.Connection | None = None
 
     def __enter__(self) -> sqlite3.Connection:
