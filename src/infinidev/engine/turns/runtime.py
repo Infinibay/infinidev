@@ -135,6 +135,8 @@ def _system_prompt(agent: Any, configuration: Any, *, workspace_path: str | None
 
 def _compact(messages: list[dict[str, Any]]) -> None:
     references = {id(message): message.get('_archive_reference') for message in messages}
+    action_contents = {id(message): message.get('content') for message in messages
+                       if message.get('_action_metadata')}
     manual_results = [message for message in messages if message.get('_tool_result')]
     for message in manual_results:
         message['role'] = 'tool'
@@ -145,6 +147,13 @@ def _compact(messages: list[dict[str, Any]]) -> None:
         reference = references.get(id(message))
         if reference and reference not in message.get('content', ''):
             message['content'] += '\n' + reference
+        declaration = message.get('_action_metadata')
+        if (declaration and message.get('role') == 'assistant'
+                and message.get('content') != action_contents.get(id(message))
+                and not message['content'].endswith('\n' + declaration)):
+            # Manual actions live in content; restore only their bounded declarations
+            # after every compactor, without reviving large executable inputs.
+            message['content'] += '\n' + declaration
 
 
 def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
@@ -280,8 +289,9 @@ def _call(ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]]) -> LLMCal
     if recorder is not None:
         recorder.request(ctx.recording_run_id, ctx.recording_iteration, messages,
                          ctx.tool_schemas, mode='manual' if ctx.manual_tc else 'function_calling')
-    measurement = ([{k: v for k, v in message.items() if k != '_recording_source'}
-                    for message in messages] if recorder is not None else messages)
+    measurement = [{k: v for k, v in message.items()
+                    if k not in {'_recording_source', '_action_metadata'}}
+                   for message in messages]
     caller._record_request_payload(ctx, measurement, schemas, mode=(
         'manual' if ctx.manual_tc else 'function_calling'))
     provider_messages = [{key: value for key, value in message.items()
@@ -740,6 +750,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         'Conversation interrupted: tool validation failed in 3 batches.')
                 continue
             invalid_batches = 0
+            action = _action_message(ctx, result, calls)
             if tool_call_metadata and not close_deferred:
                 declarations = [{'tool': call.function.name, 'metadata':
                     ActionEnvelope.model_validate_json(call.function.arguments).metadata.model_dump()
@@ -749,9 +760,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 declared = 'Model-declared tool call metadata (not host evidence):\n' + json.dumps(
                     declarations, ensure_ascii=False)
                 publish(declared)
-                # A separate context item survives manual action compaction.
-                messages.append({'role': 'user', 'content': declared})
-            messages.append(_action_message(ctx, result, calls))
+                if ctx.manual_tc:
+                    action['_action_metadata'] = declared
+            messages.append(action)
             pending_images = []
             for call, args in validated:
                 if engine.is_cancelled:
