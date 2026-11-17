@@ -108,8 +108,8 @@ def test_sandbox_error_keeps_legacy_message(search, monkeypatch, workspace_dir):
 
 
 @pytest.mark.parametrize('code,stdout,stderr,outcome', [
-    (0,'source.rs:1:needle\n','','matches'), (1,'','','empty'),
-    (0,'source.rs:1:needle\n','backend warning','partial'),
+    (0,'source.rs\x001:needle\n','','matches'), (1,'','','empty'),
+    (0,'source.rs\x001:needle\n','backend warning','partial'),
     (1,'','backend warning','partial'), (0,'unparsed output\n','','partial'),
     (1,'omitted output\n','','partial'), (2,'','backend error','error')])
 def test_directory_result_states_preserve_legacy(search, monkeypatch, workspace_dir,
@@ -123,7 +123,7 @@ def test_directory_result_states_preserve_legacy(search, monkeypatch, workspace_
     if code == 2:
         assert legacy(result) == {'error':'Search failed: backend error'}
         assert 'match_count' not in result
-    elif code == 0 and stdout.startswith('source.rs:'):
+    elif code == 0 and stdout.startswith('source.rs\x00'):
         assert result['match_count'] == 1
         assert result['matches'][0]['content'] == 'needle'
     else:
@@ -134,7 +134,7 @@ def test_directory_result_states_preserve_legacy(search, monkeypatch, workspace_
         assert info['backend_stderr'] == stderr
 
 
-@pytest.mark.parametrize('stdout', ['', 'source.rs:1:needle\n'])
+@pytest.mark.parametrize('stdout', ['', 'source.rs\x001:needle\n'])
 @pytest.mark.parametrize('stderr', ['', 'aggregate warning'])
 def test_xargs_123_never_claims_clean_empty(search, monkeypatch, workspace_dir, stdout, stderr):
     monkeypatch.setattr(module,'run_captured',lambda *a,**kw:
@@ -265,7 +265,7 @@ def test_real_dialect_difference_is_visible_without_changing_search(search, work
 
 @pytest.mark.parametrize('count', [1,2])
 def test_directory_cap_keeps_legacy_truncation_and_hits(search, monkeypatch, workspace_dir, count):
-    stdout = ''.join(f'source.rs:{line}:needle\n' for line in range(1,count+1))
+    stdout = ''.join(f'source.rs\x00{line}:needle\n' for line in range(1,count+1))
     monkeypatch.setattr(module,'run_captured',lambda *a,**kw:CapturedProcess(0,stdout,''))
     result = json.loads(search._run(pattern='needle',file_path=str(workspace_dir),max_results=1))
     assert result['match_count'] == 1 and result['truncated'] is True
@@ -273,14 +273,25 @@ def test_directory_cap_keeps_legacy_truncation_and_hits(search, monkeypatch, wor
     assert 'result_limit' in metadata(result)['reasons']
 
 
-def test_context_parse_uncertainty_does_not_remove_actual_hits(search, monkeypatch, workspace_dir):
-    stdout = 'source.rs:2:needle\nsource.rs-1-before\n--\nsource.rs-3-after\n'
-    monkeypatch.setattr(module,'run_captured',lambda *a,**kw:CapturedProcess(0,stdout,''))
+@pytest.mark.parametrize('extra', ['', 'unparsed diagnostic\n'])
+@pytest.mark.parametrize('warning', ['', 'backend warning'])
+def test_context_rows_are_preserved_without_erasing_uncertainty(
+        search, monkeypatch, workspace_dir, extra, warning):
+    stdout = ('source.rs\x002:needle\nsource.rs\x001-before\n--\n'
+              'source.rs\x003-after\n' + extra)
+    monkeypatch.setattr(module,'run_captured',lambda *a,**kw:CapturedProcess(0,stdout,warning))
     result = json.loads(search._run(pattern='needle',file_path=str(workspace_dir),context_lines=1))
     assert result['match_count'] == 1 and result['truncated'] is False
-    assert result['matches'] == [dict(file='source.rs',line=2,content='needle')]
-    assert metadata(result)['coverage'] == 'unknown'
-    assert metadata(result)['unparsed_output_lines'] == 2
+    assert result['matches'] == [dict(file='source.rs',line=2,content='needle',context=[
+        dict(line=1,content='before'),dict(line=2,content='needle'),dict(line=3,content='after')])]
+    assert metadata(result)['coverage'] == ('unknown' if extra else 'limited' if warning else 'completed_scope')
+    if extra:
+        assert metadata(result)['unparsed_output_lines'] == 1
+    else:
+        assert 'unparsed_output' not in metadata(result)['reasons']
+
+    if warning:
+        assert "backend_stderr" in metadata(result)["reasons"]
 
 
 def test_unicode_case_handling_keeps_file_semantics(search, workspace_dir):

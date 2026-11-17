@@ -44,6 +44,34 @@ def _record_process(metadata: dict[str, Any], result: Any, *, aggregate: bool = 
         _limited(metadata, "backend_timeout", unknown=True)
 
 
+def _directory_record(line: str, *, git_backend: bool) -> tuple[str, int, str, bool] | None:
+    """Decode filename-NUL records without guessing separators inside paths."""
+    filename, separator, payload = line.partition("\0")
+    if not separator or not filename:
+        return None
+    if git_backend:
+        fields = payload.split("\0")
+        if len(fields) == 3:
+            number, column, content = fields
+            if not re.fullmatch(r"[1-9][0-9]*", column):
+                return None
+            matched = True
+        elif len(fields) == 2:
+            number, content = fields
+            matched = False
+        else:
+            return None
+    else:
+        parsed = re.fullmatch(r"([1-9][0-9]*)([:-])(.*)", payload)
+        if parsed is None:
+            return None
+        number, marker, content = parsed.groups()
+        matched = marker == ":"
+    if not re.fullmatch(r"[1-9][0-9]*", number):
+        return None
+    return filename, int(number), content, matched
+
+
 class CodeSearchTool(InfinibayBaseTool):
     is_read_only: bool = True
     name: str = "code_search"
@@ -169,7 +197,7 @@ class CodeSearchTool(InfinibayBaseTool):
         if use_git_grep:
             # Include non-ignored untracked files: an editor or coding agent
             # must be able to find a file before its first git add.
-            cmd = ["git", "grep", "--untracked", "-n", "-E"]
+            cmd = ["git", "grep", "--untracked", "-n", "--column", "-z", "-E"]
             if not case_sensitive:
                 cmd.append("-i")
             if context_lines > 0:
@@ -184,7 +212,7 @@ class CodeSearchTool(InfinibayBaseTool):
         else:
             # Fallback to plain grep. Keep -r and -n as separate tokens so the
             # max_depth file-list branch below can strip the recursion flag.
-            cmd = ["grep", "-r", "-n", "-E"]
+            cmd = ["grep", "-r", "-n", "--null", "-E"]
             if not case_sensitive:
                 cmd.append("-i")
             if context_lines > 0:
@@ -276,48 +304,38 @@ class CodeSearchTool(InfinibayBaseTool):
         if result.exit_code not in (0, 1):
             return self._error(f"Search failed: {result.stderr.strip()}")
 
-        lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
-
-        # Parse matches (skip context separator lines "--")
         matches = []
-        hit_cap = False
+        context_by_file: dict[str, dict[int, str]] = {}
+        hit_count = 0
         unparsed = 0
+        lines = result.stdout.split("\n")
+        if lines[-1] == "":
+            lines.pop()
         for line in lines:
             if line == "--":
                 continue
-            # grep output format: file:line:content (or file-line-content for context)
-            # Use partition to handle colons in content
-            first_sep = line.find(":")
-            if first_sep == -1:
+            record = _directory_record(line, git_backend=use_git_grep)
+            if record is None:
                 unparsed += 1
                 continue
-            file_part = line[:first_sep]
-            rest = line[first_sep + 1:]
-            second_sep = rest.find(":")
-            if second_sep == -1:
-                # Context line (uses - separator)
-                second_sep = rest.find("-")
-                if second_sep == -1:
-                    unparsed += 1
-                    continue
-            line_num_str = rest[:second_sep]
-            content = rest[second_sep + 1:]
-
-            try:
-                line_num = int(line_num_str)
-            except ValueError:
-                unparsed += 1
-                continue
-
-            matches.append({
-                "file": file_part,
-                "line": line_num,
-                "content": content,
-            })
-
-            if len(matches) >= max_results:
-                hit_cap = True
-                break
+            filename, number, content, matched = record
+            if context_lines:
+                context_by_file.setdefault(filename, {})[number] = content
+            if matched:
+                hit_count += 1
+                if len(matches) < max_results:
+                    matches.append({"file": filename, "line": number, "content": content})
+        # Match caps count hits, never surrounding context rows.
+        hit_cap = hit_count >= max_results
+        if context_lines:
+            for match in matches:
+                nearby = context_by_file[match["file"]]
+                match["context"] = [
+                    {"line": number, "content": nearby[number]}
+                    for number in range(max(1, match["line"] - context_lines),
+                                        match["line"] + context_lines + 1)
+                    if number in nearby
+                ]
 
         # Only flag truncation when the match cap was actually reached.
         # The old heuristic compared len(lines) to len(matches), but `lines`
