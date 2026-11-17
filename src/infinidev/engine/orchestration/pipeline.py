@@ -34,6 +34,7 @@ import os
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from infinidev.engine._best_effort import best_effort
+from infinidev.engine.context_recording import current_recorder, recorded_context
 from infinidev.engine.session_status import current_observer, observed_principal
 from infinidev.engine.turns.catalog import ToolGrant, freeze_task_tools
 from infinidev.prompts.profiles import EffectivePromptConfiguration
@@ -847,6 +848,7 @@ def _join_blocks(*parts: str | None) -> str:
     return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 
+@recorded_context
 def run_task(
     *,
     agent: Any,
@@ -861,6 +863,7 @@ def run_task(
     autonomous: bool = False,
     prompt_configuration: EffectivePromptConfiguration | None = None,
     task_tools: Sequence[Any] | None = None,
+    record_context_dir: str | os.PathLike[str] | None = None,
     _hook_reentry: bool = False,
     _autonomous_budget: Any = None,
 ) -> str:
@@ -902,6 +905,11 @@ def run_task(
                 and not autonomous and not use_phase_engine)
 
     conversational = uses_principal() if task_tools is not None else None
+    recorder = current_recorder()
+    if recorder is not None and (
+        not uses_principal() or force_gather or _settings.GATHER_ENABLED
+    ):
+        raise ValueError('Context recording requires the principal without gather or phase modes')
     if task_tools is not None and (
         not conversational or force_gather or _settings.GATHER_ENABLED
     ):
@@ -970,14 +978,15 @@ def run_task(
     # context about this turn that neither consumer should have to fetch for
     # itself, and both must stay out of ``user_input``, which is already
     # recorded as what the user typed.
-    turn_context = _join_blocks(
-        ken_context,
-        _run_task_start_hook(
-            user_input=user_input,
-            session_id=session_id,
-            skip=_hook_reentry,
-        ),
-    )
+    start_context = _run_task_start_hook(
+        user_input=user_input, session_id=session_id, skip=_hook_reentry)
+    turn_context = _join_blocks(ken_context, start_context)
+    context_sources = []
+    if recorder is not None:
+        for origin, text in (('ken', ken_context), ('task_start', start_context)):
+            if text and text.strip():
+                context_sources.append(recorder.source(
+                    origin, 'user', text.strip(), public_digest=False))
     chat_input = f"{user_input}\n\n{turn_context}" if turn_context else user_input
 
     def _reenter(instruction: str, *, continue_autonomously: bool = False) -> str:
@@ -1110,15 +1119,24 @@ def run_task(
                 "</workspace-context>"
             )
         turn_context = _join_blocks(turn_context, repository_context)
+        if recorder is not None:
+            context_sources.append(recorder.source('workspace', 'user', repository_context))
         chat_input = f"{user_input}\n\n{turn_context}"
         hooks.on_status("info", f"Target repository: {display_target}")
     if conversational:
         from infinidev.engine.session_context import render_session_context
 
         history_options = {'tool_names': tool_grant.names} if tool_grant is not None else {}
-        turn_context = _join_blocks(
-            render_session_context(session_id, user_input, **history_options), turn_context,
-        )
+        history_context = render_session_context(session_id, user_input, **history_options)
+        turn_context = _join_blocks(history_context, turn_context)
+        if recorder is not None:
+            if history_context:
+                history_source = recorder.binding('history', history_context)
+                if history_source is None:
+                    history_source = recorder.source('unknown', 'user', history_context)
+                context_sources.insert(0, history_source)
+            recorder.bundle('turn_context', 'conversation_context', 'user',
+                            turn_context, context_sources)
         if tool_grant is None and (force_gather or _settings.GATHER_ENABLED):
             gathered, _ = _run_gather_phase(
                 user_input=user_input, agent=agent, task_prompt=("", ""),
@@ -1660,11 +1678,21 @@ def _run_principal_turn(
             if status != "answered":
                 break
             remaining_iterations, remaining_tools = limits
-            turn_context = _join_blocks(
-                turn_context,
-                '<prior-turn-response authority="context">\n' + result
-                + "\n</prior-turn-response>", task_instruction(followup),
-            )
+            previous_response = ('<prior-turn-response authority="context">\n' + result
+                                 + "\n</prior-turn-response>")
+            instruction_context = task_instruction(followup)
+            recorder = current_recorder()
+            previous_context = (recorder.binding('turn_context', turn_context)
+                                if recorder is not None else None)
+            if recorder is not None and previous_context is None and turn_context:
+                previous_context = recorder.source('unknown', 'user', turn_context)
+            turn_context = _join_blocks(turn_context, previous_response, instruction_context)
+            if recorder is not None:
+                sources = [previous_context] if previous_context else []
+                sources.append(recorder.source('conversation_context', 'assistant', previous_response))
+                sources.append(recorder.source('task_end_instruction', 'user', instruction_context))
+                recorder.bundle('turn_context', 'conversation_context', 'user',
+                                turn_context, sources)
     except Exception:
         logger.exception("Conversational runtime failed")
         status, result = "failed", "Conversation failed while running the agent."

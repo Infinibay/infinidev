@@ -17,6 +17,7 @@ from infinidev.config.model_capabilities import get_model_capabilities
 from infinidev.config.settings import settings
 from infinidev.db.service import _persist_session_runtime_field, get_session_runtime_state
 from infinidev.engine.behavior.reasoning_content import extract_reasoning, reasoning_history_fields
+from infinidev.engine.context_recording import current_recorder
 from infinidev.engine.engine_logging import emit_loop_event
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.formats.manual_tool_call import ManualToolCall
@@ -85,20 +86,46 @@ def _manual_tools(schemas: list[dict[str, Any]]) -> str:
             'attempt, close explicitly with finish_turn(message).')
 
 
+def _append_manual_tools(system: str, schemas: list[dict[str, Any]]) -> str:
+    recorder = current_recorder()
+    previous = recorder.binding('system', system) if recorder is not None else None
+    if recorder is not None and previous is None:
+        previous = recorder.source('unknown', 'system', system)
+    manual_text = _manual_tools(schemas)
+    rendered = system + '\n\n' + manual_text
+    if recorder is not None:
+        manual_source = recorder.source('manual_tools', 'system', manual_text)
+        recorder.bundle('system', 'unknown', 'system', rendered,
+                        ([previous] if previous else []) + [manual_source])
+    return rendered
+
+
 def _system_prompt(agent: Any, configuration: Any, *, workspace_path: str | None = None) -> str:
     configuration = configuration or EffectivePromptConfiguration.compile()
     identity = getattr(agent, '_system_prompt_identity', None) or _IDENTITY
     parts = [identity, agent.backstory, _PROTOCOL,
              render_optional_capabilities(configuration)]
+    origins = ['unknown' if getattr(agent, '_system_prompt_identity', None)
+               else 'system.identity', 'system.backstory', 'system.protocol',
+               'system.optional_capability']
     for hint in getattr(agent, '_tech_hints', None) or []:
         from infinidev.prompts.tech import get_tech_prompt
         parts.append(get_tech_prompt(hint))
+        origins.append('system.tech_hint')
     parts.append(render_project_instructions(
         workspace_path or getattr(agent, 'workspace_path', None)))
+    origins.append('system.project_instructions')
     summaries = getattr(agent, '_session_summaries', None) or []
     if summaries:
         parts.append('<session_context>\n' + '\n'.join(summaries) + '\n</session_context>')
-    return '\n\n'.join(part for part in parts if part)
+        origins.append('system.session_summary')
+    rendered = '\n\n'.join(part for part in parts if part)
+    recorder = current_recorder()
+    if recorder is not None:
+        sources = [recorder.source(origin, 'system', part)
+                   for origin, part in zip(origins, parts) if part]
+        recorder.bundle('system', 'unknown', 'system', rendered, sources)
+    return rendered
 
 
 def _compact(messages: list[dict[str, Any]]) -> None:
@@ -244,7 +271,13 @@ def _visible_message(message: Any) -> tuple[str, Any]:
 
 def _call(ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]]) -> LLMCallResult:
     schemas = None if ctx.manual_tc else ctx.tool_schemas
-    caller._record_request_payload(ctx, messages, schemas, mode=(
+    recorder = current_recorder()
+    if recorder is not None:
+        recorder.request(ctx.recording_run_id, ctx.recording_iteration, messages,
+                         ctx.tool_schemas, mode='manual' if ctx.manual_tc else 'function_calling')
+    measurement = ([{k: v for k, v in message.items() if k != '_recording_source'}
+                    for message in messages] if recorder is not None else messages)
+    caller._record_request_payload(ctx, measurement, schemas, mode=(
         'manual' if ctx.manual_tc else 'function_calling'))
     provider_messages = [{key: value for key, value in message.items()
                           if not key.startswith('_')} for message in messages]
@@ -391,6 +424,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
     workspace_path = tool_context.workspace_path or getattr(agent, 'workspace_path', None)
 
     def trace(event: str, **data: Any) -> None:
+        recorder = current_recorder()
+        if recorder is not None:
+            recorder.event(receipt['run_id'], iterations, event, data)
         if observer is not None:
             if event in {'runtime_request', 'provider_request'}:
                 observer.record('inference', 'model_request' if event == 'runtime_request'
@@ -470,7 +506,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             schemas = [_sanitize_tool_schema(schema) for schema in schemas]
         system = _system_prompt(agent, prompt_configuration, workspace_path=workspace_path)
         if manual:
-            system += '\n\n' + _manual_tools(schemas)
+            system = _append_manual_tools(system, schemas)
         baseline_started = time.monotonic()
         tracker = engine._last_file_tracker if preserve_file_tracker else None
         if tracker is None:
@@ -483,6 +519,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             session_id=session_id, llm_params=params, manual_tc=manual, is_small=False,
             state=legacy_state, tools=tools, tool_schemas=schemas,
             tool_dispatch=build_tool_dispatch(tools), system_prompt=system)
+        recorder = current_recorder()
+        ctx.recording_run_id = receipt['run_id']
+        ctx.recording_iteration = 0
         caller = LLMCaller(
             on_thinking_chunk=lambda text: emit_loop_event('loop_thinking_chunk',
                 agent.project_id, agent.agent_id, {'text': text}),
@@ -490,17 +529,30 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 agent.project_id, agent.agent_id,
                 {'phase': phase, 'token_count': count, 'tool_name': name}))
         messages = [{'role': 'system', 'content': system}]
+        if recorder is not None:
+            recorder.attach(messages[0], recorder.binding('system', system))
         if turn_context:
             messages.append({'role': 'user', 'content':
                 '<conversation_context>\n' + turn_context + '\n</conversation_context>'})
+            if recorder is not None:
+                parent = recorder.binding('turn_context', turn_context)
+                node = recorder.bundle('conversation_message', 'conversation_context', 'user',
+                                       messages[-1]['content'], [parent] if parent else [])
+                recorder.attach(messages[-1], node)
         if state.plan or state.notes or references:
             messages.append({'role': 'user', 'content':
                 '<prior_state_context>\n' + json.dumps({**_bounded_state(state), 'evidence': [
                     _reference_for_tools(ref, ctx.tool_dispatch) for ref in references]},
                     ensure_ascii=False)
                 + '\n</prior_state_context>'})
+            if recorder is not None:
+                recorder.attach(messages[-1], recorder.source(
+                    'prior_state', 'user', messages[-1]['content']))
         messages.append({'role': 'user', 'content': _user_content(
             user_input, initial_attachments, vision)})
+        if recorder is not None:
+            recorder.attach(messages[-1], recorder.source(
+                'literal_input', 'user', messages[-1]['content']))
         # Replayed ingress stays after the original request; pending input is newer.
         for item in tuple(_parent_guidance or ()):
             messages.append({'role': 'user', 'content': _user_content(
@@ -523,6 +575,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             if ContextManager.under_context_pressure(legacy_state.last_prompt_tokens, window):
                 _compact(messages)
             iterations += 1
+            ctx.recording_iteration = iterations
             trace('runtime_request', mode='manual' if ctx.manual_tc else 'function_calling',
                   requested_tool_choice='required' if legacy_state.total_tool_calls else 'auto',
                   finish_turn_offered=any(s['function']['name'] == 'finish_turn'
@@ -538,7 +591,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     return outcome('cancelled', 'Conversation cancelled.')
                 if not ctx.manual_tc and any(p in str(exc).lower() for p in PERMANENT_ERRORS):
                     ctx.manual_tc = True
-                    messages[0]['content'] += '\n\n' + _manual_tools(schemas)
+                    messages[0]['content'] = _append_manual_tools(messages[0]['content'], schemas)
+                    recorder = current_recorder()
+                    if recorder is not None:
+                        recorder.attach(messages[0], recorder.binding('system', messages[0]['content']))
                     continue
                 raise
             if engine.is_cancelled:
@@ -633,6 +689,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         item.update(_tool_name_details(failure.name, failure.offered_names))
                 report = json.dumps({'event': 'tool_validation_rejected',
                     'batch': iterations, 'executed': False, 'calls': rejected}, ensure_ascii=False)
+                recorder = current_recorder()
+                if recorder is not None:
+                    recorder.event(receipt['run_id'], iterations, 'tool_validation_rejected',
+                                   {'calls': rejected, 'executed': False})
                 reference = _archive(ctx, iterations, 'tool_validation_rejected', {}, report)
                 if reference:
                     references.append(reference)

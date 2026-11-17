@@ -1178,10 +1178,18 @@ def get_recent_turns_full(
     otherwise hallucinate elaborations of recommendations it can't
     actually see.
     """
+    return [(row['role'], row['content']) for row in get_recent_turn_records(
+        session_id, limit=limit, max_chars_per_turn=max_chars_per_turn)]
+
+
+def get_recent_turn_records(
+    session_id: str, limit: int = 6, max_chars_per_turn: int = 2000,
+) -> list[dict[str, Any]]:
+    """Return the same bounded history with stable source IDs and clipping facts."""
     def _query(conn):
         rows = conn.execute(
             """\
-            SELECT role, content
+            SELECT id, role, content
             FROM conversation_turns
             WHERE session_id = ?
             ORDER BY created_at DESC, id DESC
@@ -1189,11 +1197,13 @@ def get_recent_turns_full(
             """,
             (session_id, limit),
         ).fetchall()
-        results: list[tuple[str, str]] = []
+        results: list[dict[str, Any]] = []
         for row in reversed(rows):
             content = row["content"] or ""
             if not content:
                 continue
+            original_chars = len(content)
+            original_bytes = len(content.encode('utf-8'))
             if len(content) > max_chars_per_turn:
                 # Keep head + tail so the model sees the opening
                 # framing AND the closing recommendations, not just
@@ -1201,7 +1211,9 @@ def get_recent_turns_full(
                 head = content[: max_chars_per_turn // 2]
                 tail = content[-(max_chars_per_turn // 2) :]
                 content = f"{head}\n\n[...truncated middle...]\n\n{tail}"
-            results.append((row["role"], content))
+            results.append({'id': row['id'], 'role': row['role'], 'content': content,
+                            'original_chars': original_chars, 'original_bytes': original_bytes,
+                            'loader_clipped': original_chars > max_chars_per_turn})
         return results
     return execute_with_retry(_query) or []
 
