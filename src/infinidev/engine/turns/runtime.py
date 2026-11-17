@@ -35,6 +35,7 @@ from infinidev.engine.multimodal import build_user_content, mention_paths_as_tex
 from infinidev.engine.session_status import current_observer
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call, tool_to_openai_schema
 from infinidev.engine.tool_executor import capture_pre_content, maybe_emit_file_change
+from infinidev.engine.turns.action_metadata import ActionEnvelope, transport_schema
 from infinidev.engine.turns.catalog import effective_tools
 from infinidev.engine.turns.models import TurnResult, TurnState
 from infinidev.engine.turns.tools import build_turn_tools
@@ -75,10 +76,13 @@ def _bounded_state(state: TurnState) -> dict[str, Any]:
     return {'plan': plan, 'notes': [note[:2000] for note in state.notes[-20:]]}
 
 
-def _manual_tools(schemas: list[dict[str, Any]]) -> str:
+def _manual_tools(schemas: list[dict[str, Any]], *, tool_call_metadata: bool = False) -> str:
+    example = ('{"metadata": {"reason": "public purpose", "expected_result": "observable evidence"}, '
+               '"input": {"parameter": "value"}}' if tool_call_metadata else
+               '{"parameter": "value"}')
     return ('Available tools and their JSON schemas:\n' + json.dumps(schemas, ensure_ascii=False)
             + '\nFor tool calls, emit {"tool_calls": [{"name": "tool_name", '
-            '"arguments": {"parameter": "value"}}]}. '
+            '"arguments": ' + example + '}]}. '
             'The assistant emits actions in that format. The host replies with '
             '[Tool: name] Result observations; do not use that observation format '
             'as an assistant action or final answer. '
@@ -86,12 +90,13 @@ def _manual_tools(schemas: list[dict[str, Any]]) -> str:
             'attempt, close explicitly with finish_turn(message).')
 
 
-def _append_manual_tools(system: str, schemas: list[dict[str, Any]]) -> str:
+def _append_manual_tools(system: str, schemas: list[dict[str, Any]], *,
+                         tool_call_metadata: bool = False) -> str:
     recorder = current_recorder()
     previous = recorder.binding('system', system) if recorder is not None else None
     if recorder is not None and previous is None:
         previous = recorder.source('unknown', 'system', system)
-    manual_text = _manual_tools(schemas)
+    manual_text = _manual_tools(schemas, tool_call_metadata=tool_call_metadata)
     rendered = system + '\n\n' + manual_text
     if recorder is not None:
         manual_source = recorder.source('manual_tools', 'system', manual_text)
@@ -357,6 +362,8 @@ def _validated_arguments(ctx: Any, call: Any) -> dict[str, Any]:
     args = json.loads(raw) if isinstance(raw, str) else raw
     if not isinstance(args, dict):
         raise ValueError('Tool arguments must be a JSON object')
+    if getattr(ctx, 'tool_call_metadata', False):
+        args = ActionEnvelope.model_validate(args).input
     schema = getattr(tool, 'args_schema', None)
     if schema is not None:
         unknown = set(args) - set(schema.model_fields)
@@ -396,7 +403,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
              max_iterations: int | None = None, max_total_tool_calls: int | None = None,
              prompt_configuration: Any = None, preserve_file_tracker: bool = False,
              on_public_message: Callable[[str], None] | None = None,
-             _parent_guidance: list[InjectedUserMessage] | None = None) -> TurnResult:
+             _parent_guidance: list[InjectedUserMessage] | None = None,
+             tool_call_metadata: bool = False) -> TurnResult:
     """Execute one bounded conversation without creating or advancing a work Task.
 
     Cancellation belongs to the host turn: this method never clears it. Zero limits
@@ -501,12 +509,14 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         tools.extend(build_turn_tools(state))
         bind_tools_to_agent(tools, agent.agent_id)
         schemas = [tool_to_openai_schema(tool) for tool in tools]
+        if tool_call_metadata:
+            schemas = [transport_schema(schema) for schema in schemas]
         if getattr(capabilities, 'needs_schema_sanitization', False):
             from infinidev.engine.schema_sanitizer import _sanitize_tool_schema
             schemas = [_sanitize_tool_schema(schema) for schema in schemas]
         system = _system_prompt(agent, prompt_configuration, workspace_path=workspace_path)
         if manual:
-            system = _append_manual_tools(system, schemas)
+            system = _append_manual_tools(system, schemas, tool_call_metadata=tool_call_metadata)
         baseline_started = time.monotonic()
         tracker = engine._last_file_tracker if preserve_file_tracker else None
         if tracker is None:
@@ -518,7 +528,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         ctx = SimpleNamespace(agent=agent, agent_id=agent.agent_id, project_id=agent.project_id,
             session_id=session_id, llm_params=params, manual_tc=manual, is_small=False,
             state=legacy_state, tools=tools, tool_schemas=schemas,
-            tool_dispatch=build_tool_dispatch(tools), system_prompt=system)
+            tool_dispatch=build_tool_dispatch(tools), system_prompt=system,
+            tool_call_metadata=tool_call_metadata)
         recorder = current_recorder()
         ctx.recording_run_id = receipt['run_id']
         ctx.recording_iteration = 0
@@ -591,7 +602,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     return outcome('cancelled', 'Conversation cancelled.')
                 if not ctx.manual_tc and any(p in str(exc).lower() for p in PERMANENT_ERRORS):
                     ctx.manual_tc = True
-                    messages[0]['content'] = _append_manual_tools(messages[0]['content'], schemas)
+                    messages[0]['content'] = _append_manual_tools(messages[0]['content'], schemas,
+                        tool_call_metadata=tool_call_metadata)
                     recorder = current_recorder()
                     if recorder is not None:
                         recorder.attach(messages[0], recorder.binding('system', messages[0]['content']))
@@ -728,6 +740,17 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         'Conversation interrupted: tool validation failed in 3 batches.')
                 continue
             invalid_batches = 0
+            if tool_call_metadata and not close_deferred:
+                declarations = [{'tool': call.function.name, 'metadata':
+                    ActionEnvelope.model_validate_json(call.function.arguments).metadata.model_dump()
+                    if isinstance(call.function.arguments, str) else
+                    ActionEnvelope.model_validate(call.function.arguments).metadata.model_dump()}
+                    for call in calls]
+                declared = 'Model-declared tool call metadata (not host evidence):\n' + json.dumps(
+                    declarations, ensure_ascii=False)
+                publish(declared)
+                # A separate context item survives manual action compaction.
+                messages.append({'role': 'user', 'content': declared})
             messages.append(_action_message(ctx, result, calls))
             pending_images = []
             for call, args in validated:

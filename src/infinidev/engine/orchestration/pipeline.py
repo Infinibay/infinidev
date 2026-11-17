@@ -864,6 +864,7 @@ def run_task(
     prompt_configuration: EffectivePromptConfiguration | None = None,
     task_tools: Sequence[Any] | None = None,
     record_context_dir: str | os.PathLike[str] | None = None,
+    tool_call_metadata: bool = False,
     _hook_reentry: bool = False,
     _autonomous_budget: Any = None,
 ) -> str:
@@ -906,6 +907,8 @@ def run_task(
 
     conversational = uses_principal() if task_tools is not None else None
     recorder = current_recorder()
+    if tool_call_metadata and (not uses_principal() or force_gather or _settings.GATHER_ENABLED):
+        raise ValueError("Tool call metadata requires the principal without gather or phase modes")
     if recorder is not None and (
         not uses_principal() or force_gather or _settings.GATHER_ENABLED
     ):
@@ -1151,7 +1154,7 @@ def run_task(
             repository_path=target_repository,
             workspace_path=agent_workspace,
             prompt_configuration=prompt_configuration, skip_instruction=_hook_reentry,
-            tool_grant=tool_grant,
+            tool_grant=tool_grant, tool_call_metadata=tool_call_metadata,
         )
 
     root_task = runtime.add_task(
@@ -1550,6 +1553,7 @@ def _run_principal_turn(
     prompt_configuration: EffectivePromptConfiguration, skip_instruction: bool,
     workspace_path: str | None = None,
     tool_grant: ToolGrant | None = None,
+    tool_call_metadata: bool = False,
 ) -> str:
     """Close a conversational turn without creating or advancing work Tasks."""
     from infinidev.config.settings import settings
@@ -1617,6 +1621,8 @@ def _run_principal_turn(
                 status, result = "cancelled", "Conversation cancelled."
                 break
             selected = {}
+            if tool_call_metadata:
+                selected['tool_call_metadata'] = True
             if tool_grant is not None:
                 tool_grant.validate()
                 selected['task_tools'] = list(tool_grant.tools)

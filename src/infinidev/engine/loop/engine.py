@@ -770,7 +770,7 @@ class LoopEngine(AgentEngine):
         initial_attachments: list[Any] | None = None,
         task_tools: list[Any] | None = None, max_iterations: int | None = None,
         max_total_tool_calls: int | None = None, prompt_configuration: Any = None,
-        preserve_file_tracker: bool = False,
+        preserve_file_tracker: bool = False, tool_call_metadata: bool = False,
         on_public_message: Callable[[str], None] | None = None,
         _parent_guidance: list[InjectedUserMessage] | None = None,
     ) -> "TurnResult":
@@ -781,7 +781,8 @@ class LoopEngine(AgentEngine):
             initial_attachments=initial_attachments, task_tools=task_tools,
             max_iterations=max_iterations, max_total_tool_calls=max_total_tool_calls,
             prompt_configuration=prompt_configuration, preserve_file_tracker=preserve_file_tracker,
-            on_public_message=on_public_message, _parent_guidance=_parent_guidance)
+            on_public_message=on_public_message, _parent_guidance=_parent_guidance,
+            tool_call_metadata=tool_call_metadata)
 
     def inject_message(
         self, message: str, attachments: list[Any] | None = None,

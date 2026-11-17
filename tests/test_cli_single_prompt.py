@@ -1247,8 +1247,9 @@ def test_single_prompt_permission_setup_failure_still_runs_cleanup(
     assert permission_handlers == ["noninteractive-handler", None]
 
 
+@pytest.mark.parametrize("metadata", [False, True])
 def test_single_prompt_continue_preserves_cross_workspace_session(
-    cli_main, monkeypatch, temp_db
+    cli_main, monkeypatch, temp_db, metadata
 ):
     """One-shot ``-c`` reuses history without moving its workspace ownership."""
     from infinidev.cli import classic_renderer
@@ -1293,7 +1294,9 @@ def test_single_prompt_continue_preserves_cross_workspace_session(
         lambda **kwargs: run_calls.append(kwargs) or "finished",
     )
 
-    cli_main._run_single_prompt("Continue", continue_session=True)
+    cli_main._run_single_prompt("Continue", continue_session=True,
+                                **({"tool_call_metadata": True} if metadata else {}))
+    assert run_calls[0].get("tool_call_metadata", False) is metadata
 
     assert run_calls[0]["session_id"] == session_id
     assert get_last_session("/original-workspace")["session_id"] == session_id
@@ -1354,3 +1357,31 @@ def test_single_prompt_subscribes_live_classic_renderer(
         "tool_detail": "should-not-render",
     })
     assert capsys.readouterr().out == ""
+
+
+def test_metadata_cli_forwarding_to_single_prompt(cli_main,monkeypatch):
+    calls=[]
+    monkeypatch.setattr(cli_main,'_run_single_prompt',lambda *a,**kw:calls.append(kw))
+    cli_main._run_main(False,False,'Task',False,False,tool_call_metadata=True)
+    assert calls[0]['tool_call_metadata'] is True
+
+
+def test_metadata_cli_rejects_tui_before_bootstrap(cli_main,monkeypatch):
+    from click.testing import CliRunner
+    from unittest.mock import Mock
+    bootstrap=Mock()
+    monkeypatch.setattr(cli_main,'_bootstrap_ken_runtime',bootstrap)
+    result=CliRunner().invoke(cli_main.main,['--tool-call-metadata'])
+    assert result.exit_code==2 and 'requires classic principal' in result.output
+    bootstrap.assert_not_called()
+
+
+@pytest.mark.parametrize('prompt',['/explore topic','/brainstorm topic'])
+def test_metadata_prompt_rejects_flow_before_bootstrap(cli_main,monkeypatch,prompt):
+    import click
+    from unittest.mock import Mock
+    bootstrap=Mock()
+    monkeypatch.setattr(cli_main,'_bootstrap_single_prompt_runtime',bootstrap)
+    with pytest.raises(click.UsageError):
+        cli_main._run_single_prompt(prompt,tool_call_metadata=True)
+    bootstrap.assert_not_called()

@@ -542,7 +542,8 @@ def _record_classic_transcript(session_id: str, role: str, text: str) -> None:
 
 
 def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
-                       continue_session: bool = False, autonomous: bool = False) -> None:
+                       continue_session: bool = False, autonomous: bool = False,
+                       tool_call_metadata: bool = False) -> None:
     """Run a single prompt non-interactively and exit.
 
     Thin adapter over :func:`engine.orchestration.run_task` /
@@ -567,6 +568,8 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
     )
 
     renderer = None
+    if tool_call_metadata and (use_phase_engine or autonomous or prompt_text.startswith(('/explore ', '/brainstorm '))):
+        raise click.UsageError("Tool call metadata requires an ordinary principal prompt")
     owned_queue = _QUEUE_NOT_PROVIDED
     try:
         bootstrapped_queue = _bootstrap_single_prompt_runtime()
@@ -632,6 +635,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
             hooks=hooks,
             use_phase_engine=use_phase_engine,
             autonomous=autonomous,
+            **({"tool_call_metadata": True} if tool_call_metadata else {}),
         )
         # Don't echo the reply again if it was already streamed/notified to
         # the terminal by the respond branch (the develop path leaves the
@@ -667,6 +671,7 @@ def _bootstrap_ken_runtime() -> None:
 
 
 @click.command()
+@click.option("--tool-call-metadata", is_flag=True, help="Require public reason/expected_result envelopes in classic principal mode for this launch.")
 @click.option("--no-tui", is_flag=True, help="Run in classic CLI mode instead of TUI.")
 @click.option("--classic", is_flag=True, hidden=True, help="Alias for --no-tui.")
 @click.option("--prompt", "-p", default=None, help="Run a single prompt non-interactively and exit.")
@@ -685,7 +690,7 @@ def _bootstrap_ken_runtime() -> None:
     help="Pick, rename, or delete a prior session (shows estimated storage).",
 )
 @click.option("--autonomous", "autonomous", is_flag=True, help="Force autonomous ('manejate vos') mode: chain plans until budget exhaustion or completion.")
-def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, provider: str | None, think: bool, profile: bool, continue_session: bool, resume: bool, autonomous: bool = False):
+def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, provider: str | None, think: bool, profile: bool, continue_session: bool, resume: bool, autonomous: bool = False, tool_call_metadata: bool = False):
     """Main entry point for Infinidev CLI."""
     from infinidev.cli.profiler import SessionProfiler
 
@@ -707,10 +712,13 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, pro
         from infinidev.config.model_capabilities import _reset_capabilities
         _reset_capabilities()
 
+    if tool_call_metadata and (think or autonomous or (not prompt and not (no_tui or classic))):
+        raise click.UsageError("--tool-call-metadata requires classic principal mode without --think/--autonomous")
     _bootstrap_ken_runtime()
 
     with SessionProfiler(enabled=profile) as profiler:
-        _run_main(no_tui, classic, prompt, think, profile, continue_session, resume, autonomous=autonomous)
+        _run_main(no_tui, classic, prompt, think, profile, continue_session, resume, autonomous=autonomous,
+                  **({"tool_call_metadata": True} if tool_call_metadata else {}))
 
     if profile and profiler.report_path:
         click.echo(click.style(f"\nProfile saved to: {profiler.report_path}", fg="cyan"))
@@ -753,7 +761,8 @@ def _resolve_classic_session(
 
 
 def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool,
-              continue_session: bool = False, resume: bool = False, autonomous: bool = False):
+              continue_session: bool = False, resume: bool = False, autonomous: bool = False,
+              tool_call_metadata: bool = False):
     """Dispatch a CLI run and always release an initialized classic runtime."""
     classic_runtime = []
     try:
@@ -767,6 +776,7 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             resume,
             autonomous,
             classic_runtime,
+            **({"tool_call_metadata": True} if tool_call_metadata else {}),
         )
     finally:
         if classic_runtime:
@@ -780,13 +790,14 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
 
 def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool,
                     continue_session: bool, resume: bool, autonomous: bool,
-                    classic_runtime: list) -> None:
+                    classic_runtime: list, *, tool_call_metadata: bool = False) -> None:
     """Run the selected CLI mode inside the outer lifecycle guard."""
     # Non-interactive --prompt mode
     if prompt:
         _run_single_prompt(prompt, use_phase_engine=think,
                             continue_session=continue_session,
-                            autonomous=autonomous)
+                            autonomous=autonomous,
+                            **({"tool_call_metadata": True} if tool_call_metadata else {}))
         return
 
     if not (no_tui or classic):
@@ -939,6 +950,15 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
             task_tools = None
             if user_input.startswith("/") or is_tools_command(user_input):
                 cmd_result = handle_command(user_input, session_id=session_id)
+                unsupported_flow = (
+                    isinstance(cmd_result, str) and cmd_result in ("init", "think")
+                ) or (
+                    isinstance(cmd_result, tuple)
+                    and cmd_result[0] in ("explore", "brainstorm")
+                )
+                if tool_call_metadata and unsupported_flow:
+                    click.echo("Tool call metadata requires an ordinary principal task; flow unchanged.")
+                    continue
 
                 if isinstance(cmd_result, ToolRequest):
                     task_tools = freeze_task_tools(
@@ -1034,6 +1054,7 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                     use_phase_engine=_use_phase_engine,
                     force_gather=_gather_next_task,
                     **({'task_tools': task_tools} if task_tools is not None else {}),
+                    **({'tool_call_metadata': True} if tool_call_metadata else {}),
                 ),
                 status,
                 permission_queue=pq,
