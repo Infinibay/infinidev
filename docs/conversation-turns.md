@@ -99,23 +99,29 @@ selector, its fallback honors the configured choice and provider capabilities.
 
 Set `INFINIDEV_TASK_TEST_REVISION_FEEDBACK_ENABLED=true` to observe test
 revisions in the principal engine. A recognised test command with an
-unambiguous zero exit is associated with the observed workspace when its
-before and after snapshots match. A later workspace change can add a
-host observation before the next request. The receipt and terminal show
+unambiguous zero exit is associated with the observed workspace when the
+executor records a launch directory inside it and the before and after
+snapshots match. The executor omits this evidence for compound shell syntax.
+The dispatcher can normalize a leading literal `cd … &&` into `cwd`, which
+is checked against the workspace like any explicit `cwd`. A later workspace
+change can add a host observation before the next request. The receipt and terminal show
 `current`, `stale`, or `unconfirmed` for the latest attempt. The receipt
 also records the time spent taking verification snapshots.
 
 The principal saves a matched observation and its available archive locator
 in the work checkpoint. At the next turn it compares the saved revision
 against a fresh workspace snapshot. Results from earlier turns are marked
-as such in the host receipt. A changed or unavailable revision clears the
-saved match. The model receives the archive locator when recall is granted.
+as such in the host receipt. A changed or unavailable revision, or a launch
+directory no longer inside the workspace, clears the saved match. Older
+observations without a recorded launch directory are discarded. The model
+receives the archive locator when recall is granted.
 
 The option is off by default. The model chooses whether to run another
 authorised check, and `finish_turn` remains available. The status describes
-the revision associated with the command result. A recognised command
-may be a wrapper or an invocation that never executes tests. Test
-execution and coverage require evidence from the runner itself.
+the revision associated with the command result. The launch directory
+identifies where the shell starts. Wrappers and runner arguments can select
+tests elsewhere. Test execution and coverage require evidence from the
+runner itself.
 
 ## Action channels and continuity
 

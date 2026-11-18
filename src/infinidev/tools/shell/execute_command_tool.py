@@ -286,8 +286,17 @@ class ExecuteCommandTool(InfinibayBaseTool):
         )
 
         effective_timeout = _effective_command_timeout(timeout)
+        # Compound shell syntax can change directory before running the check.
+        record_launch = (
+            settings.TASK_TEST_REVISION_FEEDBACK_ENABLED
+            and not any(char in command for char in "\r\n;&|()<>`")
+        )
 
         try:
+            if record_launch:
+                # Preserve errors from the authored path before resolving symlinks and `..`.
+                os.stat(cwd)
+                cwd = os.path.realpath(cwd, strict=True)
             from infinidev.engine.static_analysis_timer import measure as _sa_measure
             with _sa_measure("subprocess_exec"):
                 if has_stdin_input_handler():
@@ -301,6 +310,8 @@ class ExecuteCommandTool(InfinibayBaseTool):
                     result = self._run_sealed(
                         command, cwd, run_env, effective_timeout,
                     )
+            if record_launch:
+                result["launch_cwd"] = cwd
             if environment_adjustment:
                 result["environment_adjustment"] = environment_adjustment
             from infinidev.engine.guidance.test_runners import (

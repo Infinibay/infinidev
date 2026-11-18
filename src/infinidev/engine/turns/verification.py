@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+from pathlib import Path
 from typing import Literal
 
 from infinidev.engine._best_effort import best_effort
@@ -39,6 +41,16 @@ class TurnTestVerification:
         finally:
             self.snapshot_ns += time.monotonic_ns() - started
 
+    def _workspace_launch(self, cwd: object) -> bool:
+        baseline = self._tracker.baseline
+        if baseline is None or not isinstance(cwd, str) or "\0" in cwd or not os.path.isabs(cwd):
+            return False
+        try:
+            launch = Path(os.path.realpath(cwd, strict=True))
+            return launch.is_relative_to(baseline.root) and launch.is_dir()
+        except OSError:
+            return False
+
     def observe_test(self, revision_before: str | None, result: str) -> None:
         self.observation = None
         self.from_prior_turn = False
@@ -51,6 +63,7 @@ class TurnTestVerification:
             return
         if (
             not isinstance(payload, dict)
+            or not self._workspace_launch(payload.get("launch_cwd"))
             or type(payload.get("exit_code")) is not int
             or payload["exit_code"] != 0
             or payload.get("success") is False
@@ -59,7 +72,9 @@ class TurnTestVerification:
         ):
             return
         if self.snapshot() == revision_before:
-            self.observation = TestObservation(revision=revision_before)
+            self.observation = TestObservation(
+                revision=revision_before, launch_cwd=payload["launch_cwd"],
+            )
             self.status = "current"
 
     def restore(self, observation: TestObservation) -> None:
@@ -72,6 +87,10 @@ class TurnTestVerification:
     def refresh(self) -> bool:
         """Check a current result and report whether it just became stale."""
         if self.observation is None:
+            return False
+        if not self._workspace_launch(self.observation.launch_cwd):
+            self.observation = None
+            self.status = "unconfirmed"
             return False
         revision = self.snapshot()
         if revision == self.observation.revision:

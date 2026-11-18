@@ -717,6 +717,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             prior_observation = {
                 'revision_status': verification.status,
                 'recognized_test_command_exit_code': 0,
+                'launch_cwd': state.previous_test_observation.launch_cwd,
             }
             locator = state.previous_test_observation.locator
             if locator and 'recall_context' in ctx.tool_dispatch:

@@ -53,6 +53,7 @@ class TestObservation(BaseModel):
     """A zero exit associated with a measured workspace revision."""
 
     revision: str = Field(strict=True, pattern=r"^[0-9a-f]{64}$")
+    launch_cwd: str = Field(strict=True, min_length=1)
     locator: str | None = Field(default=None, strict=True, max_length=500)
 
 
