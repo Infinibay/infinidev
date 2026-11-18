@@ -1,10 +1,15 @@
 {
   "id": "capability.progress_discipline",
-  "reason": "the work includes retries, iterative diagnosis, repeated reviews, or autonomous continuation",
+  "reason": "the work involves navigating or modifying code with tools, repeated attempts, or autonomous continuation",
   "guidance": [
     "Repeat an action only when the previous result changed the hypothesis or the next attempt tests a",
     "diagnosed cause. Record concrete progress: a changed artifact, new evidence, a closed criterion,",
     "or a changed blocker. Stop for a bounded report when iterations no longer add information; do",
-    "not rerun unchanged checks or emit status messages merely to appear active."
+    "not rerun unchanged checks or emit status messages merely to appear active.",
+    "Choose the next action from the evidence already available.",
+    "When a search returns a plausible file and line, read that location before searching again.",
+    "Repeat a search only when a changed query or scope can answer a specific remaining question.",
+    "Once the exact target and edit are grounded, make the edit and verify the requested result.",
+    "Before reporting a missing tool, check the current catalog. If the tool is offered and authorized, use it and report any concrete rejection."
   ]
 }

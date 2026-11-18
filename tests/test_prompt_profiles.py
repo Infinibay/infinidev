@@ -1500,3 +1500,25 @@ def test_invalid_structured_setting_is_rejected(tmp_path, setting, message) -> N
 
     with pytest.raises(PromptProfileError, match=message):
         resolve_prompt_profile("develop", "loop.identity", path)
+
+
+def test_principal_progress_discipline_guides_next_action_only_when_enabled() -> None:
+    from types import SimpleNamespace
+
+    from infinidev.engine.turns.runtime import _system_prompt
+    from infinidev.prompts.profiles import EffectivePromptConfiguration, PromptProfile
+
+    agent = SimpleNamespace(backstory="Test agent")
+    default = _system_prompt(agent, EffectivePromptConfiguration({}))
+    enabled = _system_prompt(agent, EffectivePromptConfiguration({
+        "develop": {"capability.progress_discipline": PromptProfile(enabled=True)},
+    }))
+
+    decisions = (
+        "read that location before searching again",
+        "a changed query or scope can answer a specific remaining question",
+        "check the current catalog",
+        "report any concrete rejection",
+    )
+    assert all(decision not in default for decision in decisions)
+    assert all(decision in enabled for decision in decisions)
