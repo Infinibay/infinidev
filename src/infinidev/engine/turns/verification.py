@@ -6,13 +6,16 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.file_change_tracker import FileChangeTracker
-from infinidev.engine.guidance.test_runners import annotate_test_result_payload
+from infinidev.engine.guidance.test_runners import annotate_test_result_payload, is_test_command
 from infinidev.engine.turns.models import TestObservation
 from infinidev.tools.base.tool_effects import ToolEffects, local_effects_for_name
+
+if TYPE_CHECKING:
+    from infinidev.engine.loop.models import LoopState
 
 
 def may_change_workspace(name: str, effects: ToolEffects | None) -> bool:
@@ -25,12 +28,18 @@ def may_change_workspace(name: str, effects: ToolEffects | None) -> bool:
 class TurnTestVerification:
     """Track the latest check and revalidate a saved observation when resuming."""
 
-    def __init__(self, tracker: FileChangeTracker) -> None:
+    def __init__(self, tracker: FileChangeTracker, state: LoopState) -> None:
         self._tracker = tracker
+        self._state = state
         self.observation: TestObservation | None = None
+        self.result_matches_output = False
         self.from_prior_turn = False
         self.status: Literal["current", "stale", "unconfirmed"] | None = None
         self.snapshot_ns = 0
+
+    def matches_test(self, command: object) -> bool:
+        """Recognize the effective shell command using the active test declarations."""
+        return isinstance(command, str) and is_test_command(command, self._state)
 
     def snapshot(self) -> str | None:
         started = time.monotonic_ns()
@@ -51,8 +60,12 @@ class TurnTestVerification:
         except OSError:
             return False
 
-    def observe_test(self, revision_before: str | None, result: str) -> None:
+    def observe_test(
+        self, revision_before: str | None, result: str, *, result_matches_output: bool,
+    ) -> None:
+        """Record the original result and whether the displayed output can locate it."""
         self.observation = None
+        self.result_matches_output = False
         self.from_prior_turn = False
         self.status = "unconfirmed"
         if revision_before is None:
@@ -75,6 +88,7 @@ class TurnTestVerification:
             self.observation = TestObservation(
                 revision=revision_before, launch_cwd=payload["launch_cwd"],
             )
+            self.result_matches_output = result_matches_output
             self.status = "current"
 
     def restore(self, observation: TestObservation) -> None:

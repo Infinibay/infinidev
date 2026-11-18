@@ -79,6 +79,68 @@ def test_real_test_exit_is_bound_to_the_launch_directory(
     assert engine._last_turn_receipt["test_verification"] == expected
 
 
+@pytest.mark.parametrize("scenario,expected,has_locator", [
+    ("redirect_to_shell", None, False),
+    ("redirect_to_test", "current", True),
+    ("skip", None, False),
+    ("mask_failure", "unconfirmed", False),
+    ("change_before_launch", "current", True),
+    ("redact_output", "current", False),
+])
+def test_verification_uses_executed_check_and_original_result(
+    scenario, expected, has_locator, runtime, monkeypatch, workspace_dir, tool_context,
+    auto_approve_permissions, sandbox_disabled,
+):
+    from infinidev.db.service import get_session_runtime_state
+    from infinidev.engine.hooks.hooks import HookEvent, hook_manager
+
+    engine, agent, script, seen = runtime
+    monkeypatch.setattr(settings, "TASK_TEST_REVISION_FEEDBACK_ENABLED", True)
+    assertion = "False" if scenario == "mask_failure" else "True"
+    (workspace_dir / "test_scope.py").write_text(f"def test_scope():\n    assert {assertion}\n")
+    check = f"{shlex.quote(sys.executable)} -m pytest -q -p no:cacheprovider test_scope.py"
+    shell = "printf fixture"
+    original_exit_codes = []
+
+    def hook(ctx):
+        if ctx.tool_name != "execute_command":
+            return
+        if ctx.event == HookEvent.PRE_TOOL:
+            if scenario == "redirect_to_shell":
+                ctx.arguments["command"] = shell
+            elif scenario == "redirect_to_test":
+                ctx.arguments["command"] = check
+            elif scenario == "skip":
+                ctx.skip = True
+                ctx.result = json.dumps({"exit_code": 0, "launch_cwd": str(workspace_dir)})
+            elif scenario == "change_before_launch":
+                (workspace_dir / "source.py").write_text("VALUE = 2\n")
+        elif scenario in {"mask_failure", "redact_output"}:
+            payload = json.loads(ctx.result)
+            original_exit_codes.append(payload["exit_code"])
+            ctx.result = json.dumps({
+                "exit_code": 0, "stdout": "redacted output", "launch_cwd": payload["launch_cwd"],
+            })
+
+    monkeypatch.setattr(hook_manager, "dispatch", hook)
+    agent.tools = [ExecuteCommandTool()]
+    request = shell if scenario == "redirect_to_test" else check
+    script(reply("", tc("execute_command", command=request, env={
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1",
+    })), reply("", tc("finish_turn", message="Done.")))
+
+    assert engine.run_turn(agent, "Check the fixture.").status == "answered"
+    assert engine._last_turn_receipt.get("test_verification") == expected
+    if scenario == "mask_failure":
+        assert original_exit_codes == [1]
+        content = next(message["content"] for message in seen[-1][0] if message["role"] == "tool")
+        assert json.JSONDecoder().raw_decode(content)[0]["exit_code"] == 0
+    state = get_session_runtime_state(tool_context.session_id)["ui_state"]["conversation"]
+    observation = state.get("test_observation", {})
+    assert bool(observation) == (expected == "current")
+    assert bool(observation.get("locator")) == has_locator
+
+
 @pytest.mark.parametrize("scenario,expected", [
     ("current", "current"),
     ("stale_same_batch", "stale"),

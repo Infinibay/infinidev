@@ -123,14 +123,17 @@ unambiguous zero exit is associated with the observed workspace when the
 executor records a launch directory inside it and the before and after
 snapshots match. The executor omits this evidence for compound shell syntax.
 The dispatcher can normalize a leading literal `cd … &&` into `cwd`, which
-is checked against the workspace like any explicit `cwd`. A later workspace
-change can add a host observation before the next request. The receipt and terminal show
-`current`, `stale`, or `unconfirmed` for the latest attempt. The receipt
-also records the time spent taking verification snapshots.
+is checked against the workspace like any explicit `cwd`. The dispatcher
+classifies the command after pre-tool hooks and checks the original tool
+result. A later workspace change can add a host observation before the next
+request. The receipt and terminal show `current`, `stale`, or `unconfirmed`
+for the latest attempt. The receipt also records the time spent taking
+verification snapshots.
 
-The principal saves a matched observation and its available archive locator
-in the work checkpoint. At the next turn it compares the saved revision
-against a fresh workspace snapshot. Results from earlier turns are marked
+The principal saves a matched observation in the work checkpoint. It includes
+the archive locator when the displayed output matches the original result.
+At the next turn it compares the saved revision against a fresh workspace
+snapshot. Results from earlier turns are marked
 as such in the host receipt. A changed or unavailable revision, or a launch
 directory no longer inside the workspace, clears the saved match. Older
 observations without a recorded launch directory are discarded. The model

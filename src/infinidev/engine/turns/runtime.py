@@ -26,7 +26,6 @@ from infinidev.engine.engine_logging import emit_loop_event
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.formats.manual_tool_call import ManualToolCall
 from infinidev.engine.formats.tool_call_format import get_registered_formats
-from infinidev.engine.guidance.test_runners import is_test_command
 from infinidev.engine.llm_client import PERMANENT_ERRORS, call_llm
 from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.llm_call_result import LLMCallResult
@@ -757,7 +756,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         baseline_elapsed_ms = int((time.monotonic() - baseline_started) * 1000)
         engine._last_file_tracker = tracker
         if settings.TASK_TEST_REVISION_FEEDBACK_ENABLED:
-            verification = TurnTestVerification(tracker)
+            verification = TurnTestVerification(tracker, legacy_state)
             if state.previous_test_observation is not None:
                 verification.restore(state.previous_test_observation)
         set_loop_state(agent.agent_id, legacy_state)
@@ -1148,6 +1147,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     body += 'Respond to the update.'
                 else:
                     previous_plan = state.plan
+                    previous_test = verification.observation if verification is not None else None
+                    new_test = False
                     tool = ctx.tool_dispatch[call.function.name]
                     workspace_effect = may_change_workspace(
                         call.function.name, getattr(tool, 'effects', None))
@@ -1157,12 +1158,6 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                             engine._tool_cancel_event.set()
                         # Count attempts, including host-denied calls, against the global fuse.
                         legacy_state.total_tool_calls += 1
-                        command = args.get('command')
-                        test_attempt = (
-                            verification is not None and call.function.name == 'execute_command'
-                            and isinstance(command, str) and is_test_command(command, legacy_state)
-                        )
-                        revision_before = verification.snapshot() if test_attempt else None
                         if observer is not None:
                             observer.record('tool', 'tool_started', tool_name=call.function.name)
                         with capture_file_reads() as file_reads:
@@ -1171,7 +1166,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                     'agent_id': agent.agent_id,
                                     'cancel_event': engine._tool_cancel_event},
                                 attachments_out=attachments, file_tracker=tracker,
-                                file_change_hooks=engine._hooks)
+                                file_change_hooks=engine._hooks, test_verification=verification)
                         if readback_available:
                             readback_pending = _confirmed_write_target(
                                 call.function.name, body, workspace_path)
@@ -1190,9 +1185,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                   output_sha256=hashlib.sha256(body.encode()).hexdigest(),
                                   output_bytes=len(body.encode()))
                         if verification is not None:
-                            if test_attempt:
-                                verification.observe_test(
-                                    None if engine.is_cancelled else revision_before, body)
+                            new_test = (verification.observation is not None
+                                        and verification.observation is not previous_test)
+                            if new_test:
                                 verification_dirty = False
                             elif verification.status == 'current':
                                 verification_dirty |= workspace_effect
@@ -1212,7 +1207,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                             file_read = file_reads[0] if len(file_reads) == 1 and not engine.is_cancelled else None
                             retain_evidence(reference, _evidence_source(
                                 call.function.name, args, workspace_path, file_read))
-                    if test_attempt and verification.observation is not None:
+                    if new_test and verification.result_matches_output:
                         verification.observation.locator = reference or None
                     if workspace_effect or state.plan is not previous_plan:
                         persist_work(checkpoint=True)

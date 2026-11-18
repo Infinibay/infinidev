@@ -36,6 +36,7 @@ from infinidev.tools.shell.shell_invocation import split_leading_cd
 
 if TYPE_CHECKING:
     from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.turns.verification import TurnTestVerification
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +385,7 @@ def execute_tool_call(
     *,
     file_tracker: FileChangeTracker | None = None,
     file_change_hooks: object | None = None,
+    test_verification: TurnTestVerification | None = None,
 ) -> str:
     """Execute a tool call and return the result as a string.
 
@@ -850,6 +852,8 @@ def execute_tool_call(
     cancelled_by_user = False
     tracked_arguments = None
     pre_content = None
+    test_attempt = False
+    revision_before = None
     try:
         from infinidev.engine.tool_progress import (
             is_tool_cancelled,
@@ -874,7 +878,12 @@ def execute_tool_call(
                         pre_content = capture_pre_content(
                             name, tracked_arguments, file_tracker, tool=tool,
                         )
-                result = tool._run(**args)
+                if (test_verification is not None and name == "execute_command"
+                        and test_verification.matches_test(args.get("command"))):
+                    test_attempt = True
+                    revision_before = test_verification.snapshot()
+                if not is_tool_cancelled():
+                    result = tool._run(**args)
             cancelled_by_user = is_tool_cancelled()
         # Unwrap ToolResult (text + optional image attachments). The text
         # goes into the role=tool message; attachments are surfaced via
@@ -908,6 +917,13 @@ def execute_tool_call(
     ctx.event = HookEvent.POST_TOOL
     ctx.result = result_str
     hook_manager.dispatch(ctx)
+    if test_verification is not None and test_attempt:
+        cancel_event = ctx.metadata.get("cancel_event")
+        stopped = cancelled_by_user or (cancel_event is not None and cancel_event.is_set())
+        test_verification.observe_test(
+            None if stopped else revision_before, result_str,
+            result_matches_output=ctx.result == result_str,
+        )
     if tracked_arguments is not None and not cancelled_by_user:
         from infinidev.engine.tool_executor import maybe_emit_file_change
 
