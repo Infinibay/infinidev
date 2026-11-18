@@ -237,6 +237,95 @@ def test_large_file_preview_keeps_whitespace_in_visible_lines(bound_tool, worksp
     assert "   802\ttail\t \n" in result
 
 
+@pytest.mark.parametrize("manual", [False, True])
+def test_context_rejection_recovers_archived_read_without_dispatching_it_again(
+        runtime, monkeypatch, manual):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from litellm.exceptions import ContextWindowExceededError
+
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    engine, agent, script, seen = runtime
+    if manual:
+        monkeypatch.setattr("infinidev.engine.turns.runtime.get_model_capabilities",
+                            lambda: SimpleNamespace(supports_function_calling=False,
+                                                    supports_vision=False))
+    source = ["evidence " * 10] * 400 + ["tail from the observed version"]
+    path = Path(agent.workspace_path) / "evidence.txt"
+    path.write_text("\n".join(source))
+    final_line = "   401\ttail from the observed version"
+    prompt = "Recover the final line of the observed file."
+
+    def action(name, **arguments):
+        if manual:
+            return reply(json.dumps({"tool_calls": [{"name": name, "arguments": arguments}]}))
+        return reply("", tc(name, **arguments))
+
+    def observation(request, name):
+        if manual:
+            prefix = f"[Tool: {name}] Result:\n"
+            return next(m["content"].removeprefix(prefix) for m in request
+                        if m["role"] == "user" and m["content"].startswith(prefix))
+        return next(m["content"] for m in reversed(request) if m["role"] == "tool")
+
+    def reject():
+        assert final_line in observation(seen[-1][0], "read_file")
+        path.write_text("different source after the read")
+        return ContextWindowExceededError("context window exceeded", "scripted", "openai")
+
+    def retrieve():
+        original = seen[1][0]
+        retry = seen[-1][0]
+        result = json.loads(observation(retry, "read_file"))
+        assert result["status"] == "archived_for_context"
+        assert final_line not in result["excerpt"]
+        assert retry[:3] == original[:3]
+        assert [m["tool_call_id"] for m in retry if m["role"] == "tool"] == [
+            m["tool_call_id"] for m in original if m["role"] == "tool"
+        ]
+        return action("recall_context", reference=result["reference"],
+                      start=result["original_characters"] - len(final_line))
+
+    script(action("read_file", file_path=path.name), reject, retrieve,
+           action("finish_turn", message="Recovered the archived observation."))
+    turn = engine.run_turn(agent, prompt, task_tools=[ReadFileTool(), RecallContextTool()])
+    assert turn.status == "answered"
+    assert turn.metrics["observed_iterations"] == 4
+    assert engine._last_turn_receipt["dispatches"] == 2
+    page = observation(seen[-1][0], "recall_context")
+    assert json.loads(page)["content"] == final_line
+
+
+@pytest.mark.parametrize(("recall_granted", "limit", "requests"), [
+    (False, 0, 2),
+    (True, 2, 2),
+    (True, 0, 3),
+])
+def test_context_recovery_respects_grant_limit_and_one_retry(runtime, recall_granted, limit, requests):
+    from pathlib import Path
+
+    from litellm.exceptions import ContextWindowExceededError
+
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    engine, agent, script, seen = runtime
+    path = Path(agent.workspace_path) / "oversized.txt"
+    path.write_text("oversized evidence " * 2000)
+    tools = [ReadFileTool()]
+    if recall_granted:
+        tools.append(RecallContextTool())
+    rejection = ContextWindowExceededError("context window exceeded", "scripted", "openai")
+    script(reply("", tc("read_file", file_path=path.name)), rejection, rejection)
+
+    turn = engine.run_turn(agent, "Inspect file", task_tools=tools, max_iterations=limit)
+    assert turn.status == "failed"
+    assert "context window exceeded" in turn.message
+    assert len(seen) == requests
+    assert engine._last_turn_receipt["dispatches"] == 1
+
+
 def test_followup_can_select_an_archive_by_requested_file(runtime):
     from pathlib import Path
 

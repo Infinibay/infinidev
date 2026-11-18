@@ -26,6 +26,18 @@ def local_completion_endpoint(monkeypatch, tmp_path):
             index = len(requests)
             requests.append((self.path, payload, raw))
             (tmp_path / f'request-{index}.json').write_bytes(raw)
+            if reply_name[0] == 'reject_context':
+                failure = json.dumps({'error': {
+                    'type': 'invalid_request_error',
+                    'message': ('request exceeds the context window: prompt (32000 tokens) '
+                                'leaves no room to answer in the context (32000)'),
+                }}).encode()
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(failure)))
+                self.end_headers()
+                self.wfile.write(failure)
+                return
             if isinstance(payload.get('tool_choice'), dict) and reply_name[0] == 'reject_named':
                 failure = b'{"error":{"message":"Named tool_choice is not supported"}}'
                 self.send_response(400)
@@ -276,6 +288,24 @@ def test_post_llm_hook_failure_does_not_repeat_a_received_response(
     with pytest.raises(RuntimeError, match='Hook failed'):
         call_llm(get_litellm_params(), messages, schemas, tool_choice=named, retry_attempts=1)
     assert [payload['tool_choice'] for _, payload, _ in requests] == [named]
+
+
+def test_compatible_context_rejection_is_visible_through_litellm(
+        monkeypatch, local_completion_endpoint):
+    from litellm.exceptions import BadRequestError
+
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.engine.llm_client import call_llm
+    from infinidev.engine.turns.context_recovery import is_context_window_rejection
+
+    endpoint, requests, reply_name, _ = local_completion_endpoint
+    messages, schemas = synthetic_request(monkeypatch, endpoint, True)
+    reply_name[0] = 'reject_context'
+    with pytest.raises(BadRequestError) as exc:
+        call_llm(get_litellm_params(), messages, schemas, retry_attempts=1,
+                 on_thinking_chunk=lambda _: None)
+    assert is_context_window_rejection(exc.value)
+    assert len(requests) == 1
 
 
 @pytest.mark.parametrize('returned_name', ['read_file', 'Read', 'write_file', 'devkit:read_file'])

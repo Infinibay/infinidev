@@ -41,6 +41,9 @@ from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_cal
 from infinidev.engine.tool_executor import capture_pre_content, maybe_emit_file_change
 from infinidev.engine.turns.action_metadata import ActionEnvelope, transport_schema
 from infinidev.engine.turns.catalog import effective_tools
+from infinidev.engine.turns.context_recovery import (
+    is_context_window_rejection, shorten_archived_results,
+)
 from infinidev.engine.turns.models import EvidenceSource, TurnResult, TurnState
 from infinidev.engine.turns.tools import build_turn_tools
 from infinidev.engine.turns.verification import TurnTestVerification, may_change_workspace
@@ -682,6 +685,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
               baseline_elapsed_ms=baseline_elapsed_ms,
               baseline_available=tracker.baseline is not None,
               baseline_files=len(tracker.baseline.files) if tracker.baseline else 0)
+        context_repaired = False
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
@@ -692,7 +696,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 return outcome('exhausted', 'Conversation interrupted: model call limit reached.')
             if max_calls and legacy_state.total_tool_calls >= max_calls:
                 return outcome('exhausted', 'Conversation interrupted: tool call limit reached.')
-            if ContextManager.under_context_pressure(legacy_state.last_prompt_tokens, window):
+            if not context_repaired and ContextManager.under_context_pressure(
+                legacy_state.last_prompt_tokens, window,
+            ):
                 _compact(messages)
                 readback_pending = False
             if verification is not None and verification_dirty:
@@ -734,6 +740,18 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             except Exception as exc:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
+                if is_context_window_rejection(exc):
+                    if (
+                        not context_repaired
+                        and 'recall_context' in ctx.tool_dispatch
+                        and (not max_iterations or iterations < max_iterations)
+                    ):
+                        shortened = shorten_archived_results(messages)
+                        if shortened:
+                            context_repaired = True
+                            trace('context_window_recovery', archived_results=shortened)
+                            continue
+                    raise
                 if not ctx.manual_tc and any(p in str(exc).lower() for p in PERMANENT_ERRORS):
                     ctx.manual_tc = True
                     messages[0]['content'] = _append_manual_tools(messages[0]['content'], schemas,
@@ -743,6 +761,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         recorder.attach(messages[0], recorder.binding('system', messages[0]['content']))
                     continue
                 raise
+            context_repaired = False
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
             trace('model_response', source='model', origin=result.tool_call_origin,
@@ -958,14 +977,16 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         if call.function.name not in {'finish_turn', 'update_plan'}:
                             retain_evidence(reference, _evidence_source(
                                 call.function.name, args, workspace_path))
-                        body += '\n' + reference
+                archive_metadata = {'_archive_reference': reference, '_archive_characters': len(body)}
+                if reference:
+                    body += '\n' + reference
                 if ctx.manual_tc:
                     messages.append({'role': 'user', 'content':
                         f'[Tool: {call.function.name}] Result:\n{body}',
-                        '_archive_reference': reference, '_tool_result': True})
+                        **archive_metadata, '_tool_result': True})
                 else:
                     messages.append({'role': 'tool', 'tool_call_id': call.id, 'content': body,
-                        '_archive_reference': reference})
+                        **archive_metadata})
                 if attachments:
                     pending_images.append({'role': 'user', 'content': _user_content(
                         'Tool image attachments', attachments, vision)})
