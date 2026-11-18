@@ -44,7 +44,9 @@ from infinidev.engine.turns.catalog import effective_tools
 from infinidev.engine.turns.context_recovery import (
     is_context_window_rejection, shorten_archived_results,
 )
-from infinidev.engine.turns.models import EvidenceSource, PreviousInterruption, TurnResult, TurnState
+from infinidev.engine.turns.models import (
+    EvidenceSource, PreviousCheckpoint, PreviousInterruption, TurnResult, TurnState,
+)
 from infinidev.engine.turns.tools import build_turn_tools
 from infinidev.engine.turns.verification import TurnTestVerification, may_change_workspace
 from infinidev.engine.workspace_baseline import WorkspaceBaseline
@@ -170,21 +172,32 @@ def _compact(messages: list[dict[str, Any]]) -> None:
             message['content'] += '\n' + declaration
 
 
+def _stored_receipt(conversation: Any) -> dict[str, Any]:
+    receipt = conversation.get('receipt') if isinstance(conversation, dict) else None
+    return receipt if isinstance(receipt, dict) else {}
+
+
 def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
+    previous_run_id = None
     try:
         data = get_session_runtime_state(session_id).get('ui_state', {}).get('conversation', {})
+        receipt = _stored_receipt(data)
+        if isinstance(run_id := receipt.get('run_id'), str):
+            previous_run_id = run_id
         references = data.get('evidence', [])
         references = [value for value in references[-40:]
                       if isinstance(value, str) and ' turn_provenance_' not in value]
         state = TurnState.model_validate({
             **data, 'evidence_sources': {}, 'previous_interruption': None,
+            'previous_checkpoint': None, 'previous_run_id': previous_run_id,
         })
-        receipt = data.get('receipt')
-        if isinstance(receipt, dict) and receipt.get('closure') == 'interrupted':
-            try:
+        try:
+            if receipt.get('closure') == 'interrupted':
                 state.previous_interruption = PreviousInterruption.model_validate(receipt)
-            except ValidationError:
-                pass  # Older receipts do not record a terminal status.
+            elif receipt.get('closure') == 'unclosed':
+                state.previous_checkpoint = PreviousCheckpoint.model_validate(receipt)
+        except ValidationError:
+            pass  # Older receipts do not record a terminal status.
         sources = data.get('evidence_sources')
         if isinstance(sources, dict):
             for ref in references:
@@ -197,7 +210,7 @@ def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
         return state, references
     except (ValidationError, TypeError, ValueError):
         logger.warning('Ignoring invalid persisted conversation state', exc_info=True)
-        return TurnState(), []
+        return TurnState(previous_run_id=previous_run_id), []
 
 
 def _reference_for_tools(reference: str, tool_names: Collection[str]) -> str:
@@ -549,6 +562,25 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         if len(references) > 40:
             state.evidence_sources.pop(references.pop(0), None)
 
+    def owns_work_snapshot(current: Any) -> bool:
+        # Another run may have saved newer progress while this run was in flight.
+        stored = _stored_receipt(current)
+        stored_run_id = stored.get('run_id')
+        if stored_run_id == receipt['run_id']:
+            return stored.get('closure') == 'unclosed'
+        return stored_run_id == state.previous_run_id
+
+    def persist_work(*, checkpoint: bool = False) -> None:
+        saved_receipt = {**receipt, 'closure': 'unclosed'} if checkpoint else receipt
+        try:
+            _persist_session_runtime_field(session_id, 'conversation',
+                {**_bounded_state(state), 'evidence': references[-40:], 'receipt': saved_receipt,
+                 'evidence_sources': {ref: source.model_dump(exclude_none=True)
+                                      for ref, source in state.evidence_sources.items()}},
+                replace_if=owns_work_snapshot)
+        except Exception:
+            logger.warning('Conversation state persistence failed', exc_info=True)
+
     def outcome(status: str, message: str) -> TurnResult:
         if status != 'answered' and validation_diagnostics:
             message += '\nRejected tool batches (no calls executed in these batches):\n'
@@ -571,13 +603,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
               message_sha256=hashlib.sha256(message.encode()).hexdigest(), **receipt)
         # Preflight failure or cancellation must leave the work checkpoint available.
         if iterations:
-            try:
-                _persist_session_runtime_field(session_id, 'conversation',
-                    {**_bounded_state(state), 'evidence': references[-40:], 'receipt': receipt,
-                     'evidence_sources': {ref: source.model_dump(exclude_none=True)
-                                          for ref, source in state.evidence_sources.items()}})
-            except Exception:
-                logger.warning('Conversation state persistence failed', exc_info=True)
+            persist_work()
         return TurnResult(message=message, status=status, state=state, engine=engine,
                           public_messages=list(public_messages), metrics={
             'observed_iterations': iterations,
@@ -664,7 +690,12 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 node = recorder.bundle('conversation_message', 'conversation_context', 'user',
                                        messages[-1]['content'], [parent] if parent else [])
                 recorder.attach(messages[-1], node)
-        if state.plan or state.notes or references or state.previous_interruption is not None:
+        prior = _bounded_state(state)
+        if state.previous_interruption is not None:
+            prior['previous_interruption'] = state.previous_interruption.model_dump()
+        if state.previous_checkpoint is not None:
+            prior['previous_checkpoint'] = state.previous_checkpoint.model_dump()
+        if references or any(prior.values()):
             evidence = []
             for ref in references:
                 locator = _reference_for_tools(ref, ctx.tool_dispatch)
@@ -673,9 +704,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     evidence.append({'locator': locator, **source.model_dump(exclude_none=True)})
                 else:
                     evidence.append(locator)
-            prior = {**_bounded_state(state), 'evidence': evidence}
-            if state.previous_interruption is not None:
-                prior['previous_interruption'] = state.previous_interruption.model_dump()
+            prior['evidence'] = evidence
             prior_json = json.dumps(prior, ensure_ascii=False).replace('<', r'\u003c')
             messages.append({'role': 'user', 'content':
                 '<prior_state_context>\n' + prior_json + '\n</prior_state_context>'})
@@ -932,6 +961,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         body += 'Accompanying assistant text was not published. '
                     body += 'Respond to the update.'
                 else:
+                    previous_plan = state.plan
+                    tool = ctx.tool_dispatch[call.function.name]
+                    workspace_effect = may_change_workspace(
+                        call.function.name, getattr(tool, 'effects', None))
                     engine._begin_tool_batch()
                     try:
                         if engine.is_cancelled:
@@ -975,9 +1008,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                     None if engine.is_cancelled else revision_before, body)
                                 verification_dirty = False
                             elif verification.status == 'current':
-                                tool = ctx.tool_dispatch[call.function.name]
-                                verification_dirty |= may_change_workspace(
-                                    call.function.name, getattr(tool, 'effects', None))
+                                verification_dirty |= workspace_effect
                     finally:
                         engine._finish_tool_batch()
                     # Exact pages already identify their durable source. Re-archiving and
@@ -990,6 +1021,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         if call.function.name not in {'finish_turn', 'update_plan'}:
                             retain_evidence(reference, _evidence_source(
                                 call.function.name, args, workspace_path))
+                    if workspace_effect or state.plan is not previous_plan:
+                        persist_work(checkpoint=True)
                 archive_metadata = {'_archive_reference': reference, '_archive_characters': len(body)}
                 if reference:
                     body += '\n' + reference

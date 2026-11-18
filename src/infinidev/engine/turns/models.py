@@ -42,6 +42,13 @@ class PreviousInterruption(BaseModel):
     dispatches: int = Field(ge=0, strict=True)
 
 
+class PreviousCheckpoint(BaseModel):
+    """Saved dispatcher progress without an observed close."""
+
+    closure: Literal["unclosed"]
+    dispatches: int = Field(ge=0, strict=True)
+
+
 class TurnState(BaseModel):
     """Retained context with transient conversational termination state."""
 
@@ -49,6 +56,8 @@ class TurnState(BaseModel):
     notes: list[str] = Field(default_factory=list)
     evidence_sources: dict[str, EvidenceSource] = Field(default_factory=dict, exclude=True)
     previous_interruption: PreviousInterruption | None = Field(default=None, exclude=True)
+    previous_checkpoint: PreviousCheckpoint | None = Field(default=None, exclude=True)
+    previous_run_id: str | None = Field(default=None, exclude=True)
     finished: bool = Field(default=False, exclude=True)
     reply: str | None = Field(default=None, exclude=True)
 

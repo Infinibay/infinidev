@@ -225,6 +225,114 @@ def test_followup_receives_host_interruption_without_private_model_content(runti
     assert not any('previous_interruption' in m['content'] for m in seen[-1][0])
 
 
+def test_plan_and_write_evidence_survive_hard_process_exit(runtime, tool_context, temp_db):
+    from pathlib import Path
+    import os
+    import subprocess
+    import sys
+
+    from infinidev.db.service import get_session_runtime_state
+
+    engine, agent, script, seen = runtime
+    child = '''
+import os
+import sys
+from types import SimpleNamespace
+
+from infinidev.config.settings import settings
+from infinidev.engine import working_memory
+from infinidev.engine.turns import runtime
+from infinidev.tools.base.context import set_context
+from infinidev.tools.file.edit_file_tool import EditFileTool
+from tests.test_turn_runtime import LoopEngine, reply, tc
+
+session, agent_id, workspace = sys.argv[1:]
+settings.SANDBOX_ENABLED = False
+settings.FILE_OPERATIONS_PERMISSION = "allowed_paths"
+settings.ALLOWED_FILE_PATHS = [os.path.join(workspace, "sample.txt")]
+settings.CODE_INTEL_ENABLED = False
+set_context(project_id=1, agent_id=agent_id, session_id=session, workspace_path=workspace)
+memory = working_memory.WorkingMemory(session, embed=False)
+working_memory.get_working_memory = lambda sid: memory
+runtime.get_litellm_params = lambda: {"model": "scripted"}
+runtime.get_model_capabilities = lambda: SimpleNamespace(
+    supports_function_calling=True, supports_vision=False)
+runtime._get_model_max_context = lambda params: 262144
+calls = iter([
+    reply("", tc("update_plan", plan=[
+        {"id": "verify", "title": "Verify the edit", "status": "pending"}])),
+    reply("", tc("edit_file", file_path="sample.txt", old_string="line one", new_string="edited")),
+])
+
+def call(*args, **kwargs):
+    response = next(calls, None)
+    if response is None:
+        os.write(2, args[1][-1]["content"].encode())
+        os._exit(73)
+    return response
+
+runtime.call_llm = call
+agent = SimpleNamespace(agent_id=agent_id, project_id=1, role="developer", backstory="Helper",
+                        workspace_path=workspace, tools=[EditFileTool()])
+LoopEngine().run_turn(agent, "Edit and verify")
+'''
+    process = subprocess.run(
+        [sys.executable, '-c', child, tool_context.session_id,
+         agent.agent_id, agent.workspace_path],
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, 'INFINIDEV_DB_PATH': temp_db, 'LITELLM_LOCAL_MODEL_COST_MAP': 'True'},
+        capture_output=True, timeout=30, check=False,
+    )
+    assert process.returncode == 73, process.stderr.decode(errors='replace')
+    assert (Path(agent.workspace_path) / 'sample.txt').read_text().startswith('edited\n'), (
+        process.stderr.decode(errors='replace')
+    )
+    saved = get_session_runtime_state(tool_context.session_id)['ui_state']['conversation']
+    assert saved['receipt']['closure'] == 'unclosed'
+    assert 'status' not in saved['receipt']
+    ref, = saved['evidence']
+    assert saved['evidence_sources'][ref] == {'tool': 'edit_file', 'requested_path': 'sample.txt'}
+
+    script(reply('The next step is verification.'))
+    assert engine.run_turn(agent, 'What remains?').status == 'answered'
+    prior = next(m['content'] for m in seen[-1][0] if
+                 m['content'].startswith('<prior_state_context>'))
+    state = json.loads(prior.splitlines()[1])
+    assert state['plan'] == [{'id': 'verify', 'title': 'Verify the edit', 'status': 'pending'}]
+    assert state['previous_checkpoint'] == {'closure': 'unclosed', 'dispatches': 1}
+    assert 'previous_interruption' not in state
+
+
+@pytest.mark.parametrize('other_closure', ['unclosed', 'finish_turn'])
+def test_conversation_state_preserves_snapshot_owned_by_another_run(
+        runtime, tool_context, other_closure):
+    from infinidev.db.service import _persist_session_runtime_field, get_session_runtime_state
+
+    engine, agent, script, _ = runtime
+    session_id = tool_context.session_id
+    plan = [{'id': 'verify', 'title': 'Verify', 'status': 'pending'}]
+    other = {'receipt': {'run_id': 'other-run', 'closure': other_closure},
+             'plan': [{'id': 'other', 'title': 'Other work', 'status': 'in_progress'}]}
+
+    def load_saved():
+        return get_session_runtime_state(session_id)['ui_state']['conversation']
+
+    def competing_write():
+        observed = load_saved()
+        assert observed['receipt']['closure'] == 'unclosed'
+        assert observed['plan'] == plan
+        _persist_session_runtime_field(session_id, 'conversation', other)
+        return reply('', tc('update_plan', plan=[]))
+
+    def check_before_close():
+        assert load_saved() == other
+        return reply('', tc('finish_turn', message='Done.'))
+
+    script(reply('', tc('update_plan', plan=plan)), competing_write, check_before_close)
+    assert engine.run_turn(agent, 'Update the plan').status == 'answered'
+    assert load_saved() == other
+
+
 def test_manual_calls(runtime, monkeypatch):
     engine, agent, script, seen = runtime
     from infinidev.engine.turns import runtime as rt

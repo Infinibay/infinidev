@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import sqlite3
+from collections.abc import Callable
 from typing import Any
 
 from infinidev.config.settings import settings
@@ -1056,8 +1057,9 @@ def _persist_session_runtime_field(
     value: dict[str, Any],
     *,
     task_description: str = "",
+    replace_if: Callable[[Any], bool] | None = None,
 ) -> None:
-    """Merge an engine-owned field without replaying a stale sidebar snapshot."""
+    """Merge an engine-owned field, checking any condition under the write lock."""
     if not session_id:
         return
 
@@ -1080,6 +1082,9 @@ def _persist_session_runtime_field(
                 prior_ui = {}
             if isinstance(prior_ui, dict):
                 ui_state = prior_ui
+        if replace_if is not None and not replace_if(ui_state.get(field)):
+            conn.rollback()
+            return
         ui_state[field] = value
         conn.execute(
             """
