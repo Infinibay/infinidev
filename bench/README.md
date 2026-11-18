@@ -477,6 +477,17 @@ and 26 controls. Total turn time rose from 75.35 to 81.51 seconds. The PTY
 pair took more requests with the notice. This follow-up did not establish
 a first-edit improvement, so the notice stayed in the probe.
 
+A separate comparison supplied a verified excerpt in the initial conversation
+context. Both arms received the same request and historical brief. Only the
+treatment received the exact anchor and helper, labeled with the path, line
+range and SHA-256 of the frozen file. The request check verified the excerpt
+on the wire. Both arms passed all four first-edit gates and closed via
+`finish_turn`. The excerpt reduced model requests from 23 to 17, tool
+dispatches from 26 to 17, and observed input tokens from 88,510 to 66,036.
+Measured turn time was 67.11 seconds without the excerpt and 65.64 with it.
+The four pairs used two reduced Rust fixtures, with three seeds on the
+first fixture. Source selection was supplied by the evaluator.
+
 ### What a task record means
 
 ```json
