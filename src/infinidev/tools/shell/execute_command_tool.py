@@ -233,7 +233,8 @@ class ExecuteCommandTool(InfinibayBaseTool):
         "Execute a shell command. Each call starts independently in the target "
         "repository (or workspace when no nested repository is targeted) "
         "unless you pass cwd; a shell cd from an earlier call does not persist. "
-        "Returns stdout, stderr, and exit code."
+        "Returns stdout, stderr, and exit code. truncated_streams lists streams "
+        "shown only as tails."
     )
     args_schema: Type[BaseModel] = ExecuteCommandInput
 
@@ -479,29 +480,41 @@ class ExecuteCommandTool(InfinibayBaseTool):
                     success=False,
                     killed_reason=killed_reason,
                     incomplete_streams=incomplete_streams,
+                    output_complete=False,
                 )
 
             # Drain any remaining output after the process exits.
             try:
                 rest_out, rest_err = proc.communicate(timeout=2)
-                if rest_out:
-                    emit_tool_output(rest_out.decode(errors="replace"))
-                    if _extend_bounded(stdout_buf, rest_out, buffer_limit):
-                        incomplete_streams.add("stdout")
-                if rest_err:
-                    emit_tool_output(rest_err.decode(errors="replace"))
-                    if _extend_bounded(stderr_buf, rest_err, buffer_limit):
-                        incomplete_streams.add("stderr")
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
+                # A descendant can keep the leader's pipes open after it exits.
+                rest_out, rest_err = exc.output, exc.stderr
+                killed_reason = "Timed out draining command output"
                 self._terminate(proc)
 
-            return self._capture_before_truncation(
-                exit_code=proc.returncode if proc.returncode is not None else -1,
+            for stream, buffer, data in (
+                ("stdout", stdout_buf, rest_out), ("stderr", stderr_buf, rest_err),
+            ):
+                if data:
+                    emit_tool_output(data.decode(errors="replace"))
+                    if _extend_bounded(buffer, data, buffer_limit):
+                        incomplete_streams.add(stream)
+
+            exit_code = (
+                proc.returncode if killed_reason is None and proc.returncode is not None else -1
+            )
+            result = self._capture_before_truncation(
+                exit_code=exit_code,
                 stdout=stdout_buf.decode(errors="replace"),
                 stderr=stderr_buf.decode(errors="replace"),
-                success=proc.returncode == 0,
+                success=exit_code == 0,
+                killed_reason=killed_reason,
                 incomplete_streams=incomplete_streams,
+                output_complete=killed_reason is None,
             )
+            if killed_reason is not None and proc.returncode is not None:
+                result["shell_exit_code"] = proc.returncode
+            return result
         except BaseException:
             self._terminate(proc)
             raise
@@ -523,37 +536,39 @@ class ExecuteCommandTool(InfinibayBaseTool):
         success: bool,
         killed_reason: str | None = None,
         incomplete_streams: set[str] | None = None,
+        output_complete: bool = True,
     ) -> dict:
         """Optionally persist over-limit streams, then apply legacy slices.
 
-        Capture is an additive, best-effort side effect. With the flag off,
-        incomplete context, invalid limits, quota exhaustion, or any store
-        failure, this returns exactly the dictionary produced before capture
-        existed. A handle is attached only after the store has durably written,
-        verified, and catalogued the complete decoded pre-slice text.
-        Streams whose buffers discarded bytes retain their legacy result tail
-        but cannot be advertised as complete captures.
+        Report truncated tails independently of optional capture. A handle is
+        attached only after the store has durably written, verified, and
+        catalogued the complete decoded pre-slice text. Streams whose buffers
+        discarded bytes cannot be advertised as complete captures.
         """
+        streams = {"stdout": (stdout, 10_000), "stderr": (stderr, 5_000)}
+        incomplete_streams = incomplete_streams or set()
         result: dict = {
             "exit_code": exit_code,
-            "stdout": stdout[-10000:],
-            "stderr": stderr[-5000:],
+            **{stream: text[-limit:] for stream, (text, limit) in streams.items()},
         }
         if killed_reason is not None:
             # Preserve the legacy insertion/JSON key order for interrupted runs.
             result["killed_reason"] = killed_reason
         result["success"] = success
 
-        if not settings.COMMAND_OUTPUT_CAPTURE_ENABLED:
+        truncated = [
+            stream for stream, (text, limit) in streams.items()
+            if len(text) > limit or stream in incomplete_streams
+        ]
+        if truncated:
+            result["truncated_streams"] = truncated
+
+        if not output_complete or not settings.COMMAND_OUTPUT_CAPTURE_ENABLED:
             return result
 
         over_limit = {
-            stream: text
-            for stream, text, limit in (
-                ("stdout", stdout, 10000),
-                ("stderr", stderr, 5000),
-            )
-            if len(text) > limit and (not incomplete_streams or stream not in incomplete_streams)
+            stream: streams[stream][0] for stream in truncated
+            if stream not in incomplete_streams
         }
         if not over_limit:
             return result

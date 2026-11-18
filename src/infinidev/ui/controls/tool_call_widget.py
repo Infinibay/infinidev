@@ -475,6 +475,9 @@ def _fmt_shell_like(args, result, error, width, *, code_key: str | None = None) 
         stdout = (env.get("stdout") or "").rstrip("\n")
         stderr = (env.get("stderr") or "").rstrip("\n")
         killed = env.get("killed_reason")
+        truncated = env.get("truncated_streams")
+        if not isinstance(truncated, list):
+            truncated = []
         s.append(_spacer())
         if exit_code == 0 and not killed:
             s.append(_status("✓ exit 0", ok=True))
@@ -482,13 +485,15 @@ def _fmt_shell_like(args, result, error, width, *, code_key: str | None = None) 
             s.append(_status(f"✗ killed: {_truncate(str(killed), 80)}", ok=False))
         elif exit_code is not None:
             s.append(_status(f"✗ exit {exit_code}", ok=False))
-        if stdout:
-            s.append(_label("stdout"))
-            s.append(_block(stdout, _TC_OUT_FG))
-        if stderr:
-            s.append(_label("stderr"))
-            s.append(_block(stderr, _TC_ERR_FG))
-        if not stdout and not stderr and not killed:
+        for stream, output, color in (
+            ("stdout", stdout, _TC_OUT_FG), ("stderr", stderr, _TC_ERR_FG),
+        ):
+            tail = stream in truncated
+            if output or tail:
+                s.append(_label(f"{stream} (tail)" if tail else stream))
+            if output:
+                s.append(_block(output, color))
+        if not stdout and not stderr and not killed and not truncated:
             s.append(_label("(no output)"))
     elif result and not error:
         s.append(_spacer())

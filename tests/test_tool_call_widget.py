@@ -169,6 +169,23 @@ def test_execute_command_shows_command_and_output(widget):
     assert "total 4" in out
 
 
+def test_execute_command_labels_only_the_truncated_stream(widget):
+    msg = {
+        "tool_name": "execute_command",
+        "args": {"command": "pytest -q"},
+        "result": json.dumps({
+            "exit_code": 1, "stdout": "Test summary", "stderr": "Last error",
+            "truncated_streams": ["stderr"],
+        }),
+        "error": "",
+    }
+    out = _flat(widget.render(msg, 80))
+
+    assert "stderr (tail)" in out
+    assert "stdout (tail)" not in out
+    assert "Last error" in out
+
+
 def test_execute_command_failure_shows_exit_code_and_stderr(widget):
     result = json.dumps({"exit_code": 1, "stdout": "", "stderr": "Permission denied"})
     msg = {

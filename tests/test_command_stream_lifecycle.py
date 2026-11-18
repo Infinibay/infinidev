@@ -112,6 +112,51 @@ def test_cancellation_still_applies_after_both_streams_close(tmp_path):
     assert result["killed_reason"] == "Command interrupted by user"
 
 
+def test_interrupted_command_reports_its_tail_without_a_complete_capture(
+    bound_tool, monkeypatch, tmp_path,
+):
+    monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
+    result = _run_interactive(
+        bound_tool(ExecuteCommandTool),
+        "import time; print('x' * 12_000, end='', flush=True); time.sleep(10)",
+        tmp_path,
+        timeout=1,
+    )
+
+    assert result["success"] is False
+    assert result["killed_reason"] == "Command timed out after 1s"
+    assert result["stdout"] == "x" * 10_000
+    assert result["truncated_streams"] == ["stdout"]
+    assert "command_output_handles" not in result
+
+
+def test_drain_timeout_preserves_partial_output_without_advertising_a_capture(
+    bound_tool, monkeypatch, tmp_path,
+):
+    monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
+    source = """
+import os, sys, time
+if os.fork():
+    os._exit(0)
+time.sleep(0.65)
+print("late diagnostic", flush=True)
+print("late error", file=sys.stderr, flush=True)
+sys.stderr.write("x" * 6_000)
+sys.stderr.flush()
+time.sleep(10)
+"""
+    result = _run_interactive(bound_tool(ExecuteCommandTool), source, tmp_path)
+
+    assert result["exit_code"] == -1
+    assert result["shell_exit_code"] == 0
+    assert result["stdout"] == "late diagnostic\n"
+    assert result["stderr"] == "x" * 5_000
+    assert result["success"] is False
+    assert result["killed_reason"] == "Timed out draining command output"
+    assert result["truncated_streams"] == ["stderr"]
+    assert "command_output_handles" not in result
+
+
 @pytest.mark.parametrize("reply", ["answer", None])
 def test_stdin_prompt_can_be_answered_or_stopped(monkeypatch, tmp_path, reply):
     monkeypatch.setattr(command_module, "request_stdin_input", lambda *args: reply)
@@ -165,6 +210,7 @@ def test_incomplete_stream_is_not_published_as_full_capture(
 
     assert result["success"] is True
     assert result[overflow_stream] == "x" * (10000 if overflow_stream == "stdout" else 5000)
+    assert result["truncated_streams"] == ["stdout", "stderr"]
     handles = result["command_output_handles"]
     assert overflow_stream not in handles, "a truncated tail was advertised as complete"
     assert _read_capture(handles[complete_stream], tool) == complete_text

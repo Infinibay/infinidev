@@ -6,9 +6,19 @@ larger stream behind an opaque handle so the agent can retrieve bounded ranges
 without putting the full output into the prompt, SQLite full-text search, or
 working-memory notes.
 
-The feature is additive and disabled by default. It does not change command
-execution, truncation, result ordering, or prompt reconstruction until capture
-is explicitly enabled.
+When input to either output field was clipped, `truncated_streams` lists
+the fields that show only a tail. The marker covers both the inline character
+limit and any earlier bytes dropped from a live stream's buffer. It appears
+independently of the capture setting. When capture is available for a clipped
+field, its `command_output_handles` entry lets the agent retrieve earlier text.
+
+If a descendant keeps the output pipes open after the command leader exits,
+the interactive runner may time out while draining them. It returns the
+text collected so far, `exit_code: -1`, `success: false`, and a
+`killed_reason` of `Timed out draining command output`. The leader's exit
+status is available as `shell_exit_code`. Interrupted interactive runs
+return their available inline output without publishing complete capture
+handles.
 
 ## Configuration
 
@@ -31,8 +41,8 @@ Every numeric bound is mandatory and must be a positive integer whenever
 capture is enabled. The session limit must be at least the artifact limit, and
 the project limit must be at least the session limit. Invalid limits, quota
 exhaustion, lock timeout, write failure, verification failure, or catalog
-failure disable capture for that command: the caller still receives the exact
-legacy truncated result and no handle is announced.
+failure disable capture for that command. The caller receives the inline tails
+and their truncation marker. Only verified complete captures have handles.
 
 ## Storage and catalog contract
 
@@ -133,7 +143,7 @@ maintenance code; phase 1 does not add a scheduler or daemon.
    be read only from their owning project/session.
 3. **Observe storage:** monitor the private directory size and confirm
    `command_output` catalog rows keep `name`, `description`, and `content` NULL.
-   A failed capture must show only the normal truncated output and no handle.
+   A failed capture must show the truncated output and marker without a handle.
 4. **Closure notes:** independently enable `COMMAND_OUTPUT_AUTO_NOTES_ENABLED`.
    Notes contain summaries and opaque identities, not raw command output.
 5. **Compaction:** enable `COMMAND_OUTPUT_NOTE_COMPACTION_ENABLED` only after

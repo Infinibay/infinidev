@@ -27,6 +27,7 @@ class TestExecuteCommand:
         data = json.loads(result)
         assert data["success"] is True
         assert "hello" in data["stdout"]
+        assert "truncated_streams" not in data
 
     def test_schema_explains_that_cwd_is_per_command(self):
         description = ExecuteCommandInput.model_fields["cwd"].description
@@ -160,15 +161,17 @@ class TestExecuteCommand:
             ((4321, signal.SIGKILL),),
         ]
 
-    def test_execute_stdout_truncation(self, bound_tool, auto_approve_permissions):
-        """Output longer than 10K is truncated to last 10K chars."""
+    @pytest.mark.parametrize("stream,limit", [("stdout", 10_000), ("stderr", 5_000)])
+    def test_execute_reports_the_stream_it_truncated(
+        self, bound_tool, auto_approve_permissions, stream, limit,
+    ):
         tool = bound_tool(ExecuteCommandTool)
-        # Generate >10K of output
-        result = tool._run(command="python3 -c \"print('x' * 15000)\"")
+        result = tool._run(command=f"python3 -c \"import sys; sys.{stream}.write('x' * 15000)\"")
         data = json.loads(result)
-        assert len(data["stdout"]) <= 10001  # 10K + possible newline
+        assert data[stream] == "x" * limit
+        assert data["truncated_streams"] == [stream]
 
-    def test_capture_disabled_preserves_exact_truncated_shape(
+    def test_capture_disabled_still_identifies_truncated_streams(
         self, bound_tool, auto_approve_permissions, monkeypatch
     ):
         tool = bound_tool(ExecuteCommandTool)
@@ -185,6 +188,7 @@ class TestExecuteCommand:
             "stdout": stdout[-10000:],
             "stderr": stderr[-5000:],
             "success": False,
+            "truncated_streams": ["stdout", "stderr"],
         }
 
     def test_sealed_capture_reconstructs_exact_precut_text(
@@ -202,6 +206,7 @@ class TestExecuteCommand:
         data = json.loads(tool._run(command=command))
 
         assert data["stdout"] == stdout[-10000:]
+        assert data["truncated_streams"] == ["stdout"]
         raw = data["command_output_handles"]["stdout"]
         from infinidev.engine.command_output_store import (
             CommandOutputHandle,
@@ -218,7 +223,7 @@ class TestExecuteCommand:
             handle, project_id=tool.project_id, session_id=tool.session_id
         ) == stdout
 
-    def test_capture_failure_keeps_legacy_result_and_announces_no_handle(
+    def test_capture_failure_keeps_truncation_marker_without_handle(
         self, bound_tool, auto_approve_permissions, monkeypatch
     ):
         tool = bound_tool(ExecuteCommandTool)
@@ -235,6 +240,7 @@ class TestExecuteCommand:
             "stdout": stdout[-10000:],
             "stderr": "",
             "success": True,
+            "truncated_streams": ["stdout"],
         }
 
     def test_invalid_capture_limits_soft_disable_without_handle(

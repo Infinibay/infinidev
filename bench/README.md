@@ -149,6 +149,21 @@ criterion even though `auto` created and reread the file. The fixture checks
 recognize a bounded set of source forms. This exploratory sample supports
 offering the option with the original default.
 
+### Verification counterexamples
+
+Three Qwen pairs offered the same fixture checker with the same prompts and
+tools. The control received pass or fail. The candidate also received the
+first observed failing example per file when the static checker could
+interpret it. The harness parsed fixture source without executing it and
+scored checks against the last observed edit.
+
+Both arms produced 3/3 correct artifacts and 2/3 passing final checks.
+Complete delivery rose from 1/3 to 2/3 because the two-file lease task
+closed before the call limit with counterexamples. The caller conversion
+task still missed its final check and closure in both arms. These runs
+support preserving concrete check diagnostics where available. They leave
+the improvement in artifact correctness unproven.
+
 ### What a task record means
 
 ```json
