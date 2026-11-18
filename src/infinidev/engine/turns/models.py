@@ -33,6 +33,7 @@ class EvidenceSource(BaseModel):
 
     tool: str = Field(min_length=1, max_length=100)
     requested_path: str | None = Field(default=None, max_length=200)
+    file_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class PreviousInterruption(BaseModel):

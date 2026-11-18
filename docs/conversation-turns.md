@@ -123,6 +123,14 @@ identifies where the shell starts. Wrappers and runner arguments can select
 tests elsewhere. Test execution and coverage require evidence from the
 runner itself.
 
+For an archived local `read_file` result, the prior-state context includes
+`file_revision_status` when the host observes a different file revision or
+can no longer inspect that path within the workspace. The locator continues
+to recover the original result. The host compares filesystem change
+metadata from the read and the next turn. A replacement with identical bytes
+or a change outside the returned lines can also set `changed`. Absent status
+provides no freshness guarantee, including for older archives and pod reads.
+
 ## Action channels and continuity
 
 Native action authority comes only from the provider's tool_calls field. Native

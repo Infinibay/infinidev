@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.file.read_file_input import ReadFileInput
+from infinidev.tools.file.read_observation import read_observed_lines
 
 
 _TEXT_SAFE = frozenset(
@@ -253,7 +254,7 @@ class ReadFileTool(InfinibayBaseTool):
             from infinidev.engine.static_analysis_timer import measure as _sa_measure
             with _sa_measure("tool_io"):
                 with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                    all_lines = f.readlines()
+                    all_lines = read_observed_lines(f, file_path)
         except PermissionError:
             return self._error(f"Permission denied: {file_path}")
         except Exception as e:

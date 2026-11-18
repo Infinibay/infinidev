@@ -57,6 +57,9 @@ from infinidev.prompts.project_instructions import render_project_instructions
 from infinidev.tools.base.context import (
     bind_tools_to_agent, get_context_for_agent, set_file_tracker, set_loop_state,
 )
+from infinidev.tools.file.read_observation import (
+    FileReadObservation, capture_file_reads, file_fingerprint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -237,10 +240,14 @@ def _reference_for_tools(reference: str, tool_names: Collection[str]) -> str:
     return reference[:500]
 
 
-def _evidence_source(name: str, args: dict[str, Any], workspace: str | None) -> EvidenceSource:
+def _evidence_source(
+    name: str, args: dict[str, Any], workspace: str | None,
+    file_read: FileReadObservation | None = None,
+) -> EvidenceSource:
     """Keep a bounded workspace-relative label, without recording command arguments."""
     target = args.get('file_path')
     path = None
+    fingerprint = None
     if workspace and isinstance(target, str) and target:
         try:
             root = Path(os.path.abspath(workspace))
@@ -250,11 +257,31 @@ def _evidence_source(name: str, args: dict[str, Any], workspace: str | None) -> 
             relative = requested.relative_to(root)
             if requested.resolve().is_relative_to(root.resolve()):
                 path = redact(relative.as_posix())
+                if (name == 'read_file' and file_read is not None
+                        and len(path) <= 200 and path == relative.as_posix()
+                        and Path(file_read.path) == requested):
+                    fingerprint = file_read.fingerprint
         except (OSError, RuntimeError, ValueError):
             pass
     if path and len(path) > 200:
         path = path[:199] + '…'
-    return EvidenceSource(tool=name[:100], requested_path=path)
+    return EvidenceSource(tool=name[:100], requested_path=path, file_fingerprint=fingerprint)
+
+
+def _file_revision_status(
+    source: EvidenceSource, workspace: str | None,
+) -> Literal['changed', 'unavailable'] | None:
+    if not workspace or not source.requested_path or not source.file_fingerprint:
+        return None
+    try:
+        root = Path(workspace).resolve(strict=True)
+        target = (root / source.requested_path).resolve(strict=True)
+        current = file_fingerprint(target.stat()) if target.is_relative_to(root) else None
+    except (OSError, RuntimeError, ValueError):
+        current = None
+    if current is None:
+        return 'unavailable'
+    return 'changed' if current != source.file_fingerprint else None
 
 
 def _user_content(text: str, attachments: list[Any] | None, vision: bool) -> Any:
@@ -729,7 +756,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 locator = _reference_for_tools(ref, ctx.tool_dispatch)
                 source = state.evidence_sources.get(ref)
                 if source is not None and 'recall_context' in ctx.tool_dispatch:
-                    evidence.append({'locator': locator, **source.model_dump(exclude_none=True)})
+                    label = source.model_dump(exclude={'file_fingerprint'}, exclude_none=True)
+                    if status := _file_revision_status(source, workspace_path):
+                        label['file_revision_status'] = status
+                    evidence.append({'locator': locator, **label})
                 else:
                     evidence.append(locator)
             prior['evidence'] = evidence
@@ -1008,11 +1038,12 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         revision_before = verification.snapshot() if test_attempt else None
                         if observer is not None:
                             observer.record('tool', 'tool_started', tool_name=call.function.name)
-                        body = execute_tool_call(ctx.tool_dispatch, call.function.name, args,
-                            hook_metadata={'project_id': agent.project_id,
-                                'agent_id': agent.agent_id,
-                                'cancel_event': engine._tool_cancel_event},
-                            attachments_out=attachments)
+                        with capture_file_reads() as file_reads:
+                            body = execute_tool_call(ctx.tool_dispatch, call.function.name, args,
+                                hook_metadata={'project_id': agent.project_id,
+                                    'agent_id': agent.agent_id,
+                                    'cancel_event': engine._tool_cancel_event},
+                                attachments_out=attachments)
                         if readback_available and _confirmed_file_write(call.function.name, body):
                             readback_available = False
                             readback_pending = True
@@ -1047,8 +1078,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         ctx, iterations, call.function.name, args, body)
                     if reference:
                         if call.function.name not in {'finish_turn', 'update_plan'}:
+                            file_read = file_reads[0] if len(file_reads) == 1 and not engine.is_cancelled else None
                             retain_evidence(reference, _evidence_source(
-                                call.function.name, args, workspace_path))
+                                call.function.name, args, workspace_path, file_read))
                     if test_attempt and verification.observation is not None:
                         verification.observation.locator = reference or None
                     if workspace_effect or state.plan is not previous_plan:

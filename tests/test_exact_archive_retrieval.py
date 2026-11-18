@@ -326,20 +326,38 @@ def test_context_recovery_respects_grant_limit_and_one_retry(runtime, recall_gra
     assert engine._last_turn_receipt["dispatches"] == 1
 
 
-def test_followup_can_select_an_archive_by_requested_file(runtime):
+@pytest.mark.parametrize('file_change', ['unchanged', 'modified', 'removed', 'during_dispatch'])
+def test_followup_can_select_an_archive_by_requested_file(runtime, monkeypatch, file_change):
     from pathlib import Path
 
+    from infinidev.engine.turns import runtime as turn_runtime
     from infinidev.tools.file.read_file_tool import ReadFileTool
 
     engine, agent, script, seen = runtime
     workspace = Path(agent.workspace_path)
     (workspace / "current.py").write_text("value = 'current'\n")
     (workspace / "example.py").write_text("value = 'example'\n")
+    if file_change == 'during_dispatch':
+        execute = turn_runtime.execute_tool_call
+
+        def replace_after_read(dispatch, name, args, **kwargs):
+            result = execute(dispatch, name, args, **kwargs)
+            if name == 'read_file' and args['file_path'] == 'current.py':
+                replacement = workspace / 'replacement.py'
+                replacement.write_text("value = 'changed'\n")
+                replacement.replace(workspace / 'current.py')
+            return result
+
+        monkeypatch.setattr(turn_runtime, 'execute_tool_call', replace_after_read)
     tools = [ReadFileTool(), RecallContextTool()]
     script(reply("", tc("read_file", file_path="current.py")),
            reply("", tc("read_file", file_path="example.py")),
            reply("", tc("finish_turn", message="Both files inspected.")))
     assert engine.run_turn(agent, "Inspect both files", task_tools=tools).status == "answered"
+    if file_change == 'modified':
+        (workspace / "current.py").write_text("value = 'changed'\n")
+    elif file_change == 'removed':
+        (workspace / "current.py").unlink()
 
     def recall_current():
         prior = next(message["content"] for message in seen[-1][0]
@@ -348,6 +366,13 @@ def test_followup_can_select_an_archive_by_requested_file(runtime):
         assert [(item["tool"], item["requested_path"]) for item in evidence] == [
             ("read_file", "current.py"), ("read_file", "example.py"),
         ]
+        status = {
+            'unchanged': None, 'modified': 'changed', 'removed': 'unavailable',
+            'during_dispatch': 'changed',
+        }
+        assert evidence[0].get('file_revision_status') == status[file_change]
+        assert 'file_revision_status' not in evidence[1]
+        assert all('file_fingerprint' not in item for item in evidence)
         locator = evidence[0]["locator"]
         reference = locator.split("recall_context reference: ", 1)[1].removesuffix("]")
         return reply("", tc("recall_context", reference=reference))
