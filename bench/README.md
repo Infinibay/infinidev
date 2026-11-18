@@ -268,6 +268,15 @@ source tool and the requested workspace-relative path to each locator.
 The archives held actual dispatcher output. The probe scored retrieval and
 the final answer separately. Each arm ran once per target.
 
+A follow-up used two archived reads of the same path across a file change.
+Both arms kept the source labels. The treatment added an
+`evidence_order: oldest_to_newest` field to the request. Both arms passed
+the exact-answer check for the newest observation. For the earlier
+observation, both recovered the correct page and failed the exact-answer
+check. The baseline selected the correct older reference on its first
+recall, and the treatment reached it later. The order field stayed in
+the probe.
+
 ### What a task record means
 
 ```json

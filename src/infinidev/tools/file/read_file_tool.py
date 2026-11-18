@@ -30,6 +30,14 @@ _FALLBACK_HEAD_LINES = 60
 _FALLBACK_TAIL_LINES = 30
 
 
+def _numbered_lines(lines: list[str], *, start: int = 1) -> list[str]:
+    """Format decoded lines while preserving meaningful trailing whitespace."""
+    return [
+        f"{number:>6}\t" + line.removesuffix("\n")
+        for number, line in enumerate(lines, start=start)
+    ]
+
+
 def _format_head_tail_preview(
     all_lines: list[str],
     *,
@@ -59,8 +67,7 @@ def _format_head_tail_preview(
     )
     out.append("")
     out.append(f"── First {len(head_lines)} lines ──")
-    for i, line in enumerate(head_lines, start=1):
-        out.append(f"{i:>6}\t{line.rstrip()}")
+    out.extend(_numbered_lines(head_lines))
     if tail_lines:
         out.append("")
         out.append(
@@ -68,8 +75,7 @@ def _format_head_tail_preview(
         )
         out.append("")
         out.append(f"── Last {len(tail_lines)} lines ──")
-        for i, line in enumerate(tail_lines, start=tail_start + 1):
-            out.append(f"{i:>6}\t{line.rstrip()}")
+        out.extend(_numbered_lines(tail_lines, start=tail_start + 1))
     out.append("")
     out.append("── How to read this file ──")
     out.append(
@@ -272,11 +278,7 @@ class ReadFileTool(InfinibayBaseTool):
                     f"No lines in requested range: start line {start + 1} is past "
                     f"end of file ({total_lines} lines)."
                 )
-            # Format with line numbers for easy reference
-            numbered = []
-            for i, line in enumerate(selected, start=start + 1):
-                numbered.append(f"{i:>6}\t{line.rstrip()}")
-            content = "\n".join(numbered)
+            content = "\n".join(_numbered_lines(selected, start=start + 1))
             desc = f"lines {start + 1}-{min(end, total_lines)} of {total_lines}"
         elif total_lines > _LARGE_FILE_LINE_THRESHOLD:
             # ── Large-file skeleton mode ──────────────────────────────
@@ -317,11 +319,7 @@ class ReadFileTool(InfinibayBaseTool):
                 )
                 desc = f"head+tail preview ({total_lines}-line file)"
         else:
-            # Full read — still add line numbers for consistency
-            numbered = []
-            for i, line in enumerate(all_lines, start=1):
-                numbered.append(f"{i:>6}\t{line.rstrip()}")
-            content = "\n".join(numbered)
+            content = "\n".join(_numbered_lines(all_lines))
             desc = f"{total_lines} lines"
 
         self._log_tool_usage(f"Read {file_path} ({desc})")

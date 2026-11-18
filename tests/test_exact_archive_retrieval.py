@@ -198,6 +198,45 @@ def test_runtime_issues_stable_refs_and_exact_recall_stays_complete_json(runtime
     assert engine._last_turn_receipt["dispatches"] == 2
 
 
+@pytest.mark.parametrize(("selection", "expected"), [
+    ({}, '     1\tVALUE = """first \t\n     2\tsecond  \n     3\t"""'),
+    ({"offset": 2, "limit": 1}, "     2\tsecond  "),
+])
+def test_numbered_read_and_exact_recall_preserve_source_whitespace(runtime, selection, expected):
+    from pathlib import Path
+
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    engine, agent, script, seen = runtime
+    (Path(agent.workspace_path) / "literal.py").write_bytes(
+        b'VALUE = """first \t\r\nsecond  \r\n"""')
+
+    def recall():
+        body = next(m["content"] for m in seen[-1][0] if m["role"] == "tool")
+        reference = body.split("recall_context reference: ", 1)[1].removesuffix("]")
+        return reply("", tc("recall_context", reference=reference))
+
+    script(reply("", tc("read_file", file_path="literal.py", **selection)), recall,
+           reply("", tc("finish_turn", message="Recovered.")))
+    result = engine.run_turn(agent, "Read and recover literal.py",
+                             task_tools=[ReadFileTool(), RecallContextTool()])
+    assert result.status == "answered"
+    observed, recalled = [m["content"] for m in seen[-1][0] if m["role"] == "tool"]
+    assert observed.rsplit("\n[Archived evidence; ", 1)[0] == expected
+    assert json.loads(recalled)["content"] == expected
+
+
+def test_large_file_preview_keeps_whitespace_in_visible_lines(bound_tool, workspace_dir):
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    path = workspace_dir / "sample.txt"
+    path.write_text("head  \n" + "middle\n" * 800 + "tail\t \n")
+    result = bound_tool(ReadFileTool).run(file_path="sample.txt")
+    assert "head+tail preview" in result
+    assert "     1\thead  \n" in result
+    assert "   802\ttail\t \n" in result
+
+
 def test_followup_can_select_an_archive_by_requested_file(runtime):
     from pathlib import Path
 

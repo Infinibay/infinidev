@@ -279,7 +279,7 @@ def test_creation(
                 lines = path.read_bytes().decode("utf-8").splitlines()
             except UnicodeDecodeError:
                 lines = []
-            numbered = "\n".join(f"{n:>6}\t{line.rstrip()}" for n, line in enumerate(lines, 1))
+            numbered = "\n".join(f"{n:>6}\t{line}" for n, line in enumerate(lines, 1))
             read_complete = bool(numbered) and result == numbered
             if target == source:
                 source_observed |= read_complete and path.read_bytes() == initial[source].encode()
