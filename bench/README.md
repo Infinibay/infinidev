@@ -79,6 +79,15 @@ Explicit values 0 and 0.35 reached the sampler, as did `top_p=0.55`,
 as API extensions through `extra_body`. The programming results below use
 Basalt.
 
+Strata's `serve.test_model_card_sampling` and `serve.test_effort_paths`
+also passed (18 tests on `c1ff07f1`). The effort tests send `reasoning_effort`
+to `/v1/chat/completions` and check the rendered prompt with a mock engine.
+An isolated streaming probe with native tool schemas also exercised Infinidev's
+OpenAI-compatible Qwen route. The current `THINKING_ENABLED=true` and
+`THINKING_BUDGET=ultra` still rendered thinking off. Explicit
+`chat_template_kwargs` with thinking enabled and effort set to `low` or `high`
+rendered distinct prompts (`low` and `xhigh`). This verifies transport only.
+
 A second temperature comparison used three editing tasks from
 `engine_eval_v8.tasks.jsonl` on Basalt 0.2.1 and Qwen3.8-FN-UD-IQ4_XS. Both
 arms had seed 147, automatic native tool choice, the same tool grant and a
