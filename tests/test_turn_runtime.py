@@ -161,6 +161,70 @@ def test_cancellation_during_model_preempts_reply(runtime):
     assert engine.run_turn(agent, 'Work').status == 'cancelled'
 
 
+@pytest.mark.parametrize('preflight_status', ['cancelled', 'failed'])
+def test_unstarted_turn_keeps_the_interrupted_work_checkpoint(
+        runtime, monkeypatch, preflight_status):
+    from infinidev.db.service import get_session_runtime_state
+    from infinidev.tools.base.context import get_context_for_agent
+    from infinidev.tools.file.edit_file_tool import EditFileTool
+
+    engine, agent, script, seen = runtime
+    plan = [{'id': 'verify', 'title': 'Verify revised behavior', 'status': 'in_progress'}]
+    script(reply('', tc('update_plan', plan=plan)),
+           reply('', tc('edit_file', file_path='sample.txt', old_string='line one',
+                        new_string='updated line')))
+    assert engine.run_turn(agent, 'Work', max_iterations=2,
+                           task_tools=[EditFileTool()]).status == 'exhausted'
+    assert engine.has_file_changes()
+    session_id = get_context_for_agent(agent.agent_id).session_id
+    checkpoint = get_session_runtime_state(session_id)['ui_state']['conversation']
+    assert checkpoint['plan'] == plan and checkpoint['evidence']
+
+    engine.begin_turn()
+    assert not engine.has_file_changes()
+    assert engine._last_turn_receipt is None
+    with monkeypatch.context() as preflight:
+        if preflight_status == 'cancelled':
+            engine.cancel()
+        else:
+            preflight.setattr('infinidev.engine.turns.runtime.get_litellm_params', lambda: None)
+        assert engine.run_turn(agent, 'Start follow-up').status == preflight_status
+    assert len(seen) == 2
+    assert not engine.has_file_changes()
+    assert get_session_runtime_state(session_id)['ui_state']['conversation'] == checkpoint
+
+    engine.begin_turn()
+    script(reply('Verification remains pending.'))
+    assert engine.run_turn(agent, 'What remains?').status == 'answered'
+    prior = next(m['content'] for m in seen[-1][0] if
+                 m['content'].startswith('<prior_state_context>'))
+    assert json.loads(prior.splitlines()[1])['plan'] == plan
+
+
+def test_followup_receives_host_interruption_without_private_model_content(runtime):
+    engine, agent, script, seen = runtime
+    script(reply('', tc('record', text='Observed evidence')),
+           reply('incomplete output to omit', finish_reason='length'))
+    assert engine.run_turn(agent, 'Work').status == 'exhausted'
+    engine.begin_turn()
+    script(reply('I can continue.'))
+    literal = 'Continue the previous work.'
+    assert engine.run_turn(agent, literal).status == 'answered'
+
+    request = seen[-1][0]
+    prior_block = next(m['content'] for m in request if
+                       m['content'].startswith('<prior_state_context>'))
+    prior = json.loads(prior_block.splitlines()[1])
+    assert prior['previous_interruption'] == {'status': 'exhausted', 'dispatches': 1}
+    assert 'incomplete output to omit' not in prior_block
+    assert request[-1]['content'] == literal
+
+    engine.begin_turn()
+    script(reply('Understood.'))
+    assert engine.run_turn(agent, 'New question.').status == 'answered'
+    assert not any('previous_interruption' in m['content'] for m in seen[-1][0])
+
+
 def test_manual_calls(runtime, monkeypatch):
     engine, agent, script, seen = runtime
     from infinidev.engine.turns import runtime as rt

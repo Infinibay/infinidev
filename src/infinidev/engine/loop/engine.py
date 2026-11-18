@@ -717,6 +717,7 @@ class LoopEngine(AgentEngine):
 
     def __init__(self) -> None:
         self._last_file_tracker: FileChangeTracker | None = None
+        self._last_turn_receipt: dict[str, Any] | None = None
         self._last_state: LoopState | None = None
         self._last_status: str = ""  # terminal status of the last execute()
         self._last_total_tool_calls: int = 0
@@ -939,7 +940,7 @@ class LoopEngine(AgentEngine):
             self._tool_cancel_event.clear()
 
     def begin_turn(self) -> None:
-        """Open a new user turn: forget any cancellation from the last one.
+        """Open a new user turn with fresh cancellation and reporting state.
 
         The engine instance outlives a single ``execute()`` (the TUI keeps
         one per session, and the review's rework loop re-enters it), so a
@@ -949,6 +950,8 @@ class LoopEngine(AgentEngine):
         self._cancel_event.clear()
         self._tool_cancel_event.clear()
         self._tool_running_event.clear()
+        self._last_file_tracker = None
+        self._last_turn_receipt = None
 
     @property
     def is_cancelled(self) -> bool:

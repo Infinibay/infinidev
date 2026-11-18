@@ -35,12 +35,20 @@ class EvidenceSource(BaseModel):
     requested_path: str | None = Field(default=None, max_length=200)
 
 
+class PreviousInterruption(BaseModel):
+    """Host-observed execution status of the previous interrupted turn."""
+
+    status: Literal["cancelled", "exhausted", "failed"]
+    dispatches: int = Field(ge=0, strict=True)
+
+
 class TurnState(BaseModel):
     """Retained context with transient conversational termination state."""
 
     plan: list[PlanItem] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     evidence_sources: dict[str, EvidenceSource] = Field(default_factory=dict, exclude=True)
+    previous_interruption: PreviousInterruption | None = Field(default=None, exclude=True)
     finished: bool = Field(default=False, exclude=True)
     reply: str | None = Field(default=None, exclude=True)
 

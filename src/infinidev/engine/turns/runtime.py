@@ -44,7 +44,7 @@ from infinidev.engine.turns.catalog import effective_tools
 from infinidev.engine.turns.context_recovery import (
     is_context_window_rejection, shorten_archived_results,
 )
-from infinidev.engine.turns.models import EvidenceSource, TurnResult, TurnState
+from infinidev.engine.turns.models import EvidenceSource, PreviousInterruption, TurnResult, TurnState
 from infinidev.engine.turns.tools import build_turn_tools
 from infinidev.engine.turns.verification import TurnTestVerification, may_change_workspace
 from infinidev.engine.workspace_baseline import WorkspaceBaseline
@@ -176,7 +176,15 @@ def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
         references = data.get('evidence', [])
         references = [value for value in references[-40:]
                       if isinstance(value, str) and ' turn_provenance_' not in value]
-        state = TurnState.model_validate({**data, 'evidence_sources': {}})
+        state = TurnState.model_validate({
+            **data, 'evidence_sources': {}, 'previous_interruption': None,
+        })
+        receipt = data.get('receipt')
+        if isinstance(receipt, dict) and receipt.get('closure') == 'interrupted':
+            try:
+                state.previous_interruption = PreviousInterruption.model_validate(receipt)
+            except ValidationError:
+                pass  # Older receipts do not record a terminal status.
         sources = data.get('evidence_sources')
         if isinstance(sources, dict):
             for ref in references:
@@ -557,16 +565,19 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         engine._last_state = legacy_state
         engine._last_status = status
         engine._last_total_tool_calls = legacy_state.total_tool_calls
+        receipt['status'] = status
         engine._last_turn_receipt = dict(receipt)
-        trace('turn_closed', status=status,
+        trace('turn_closed',
               message_sha256=hashlib.sha256(message.encode()).hexdigest(), **receipt)
-        try:
-            _persist_session_runtime_field(session_id, 'conversation',
-                {**_bounded_state(state), 'evidence': references[-40:], 'receipt': receipt,
-                 'evidence_sources': {ref: source.model_dump(exclude_none=True)
-                                      for ref, source in state.evidence_sources.items()}})
-        except Exception:
-            logger.warning('Conversation state persistence failed', exc_info=True)
+        # Preflight failure or cancellation must leave the work checkpoint available.
+        if iterations:
+            try:
+                _persist_session_runtime_field(session_id, 'conversation',
+                    {**_bounded_state(state), 'evidence': references[-40:], 'receipt': receipt,
+                     'evidence_sources': {ref: source.model_dump(exclude_none=True)
+                                          for ref, source in state.evidence_sources.items()}})
+            except Exception:
+                logger.warning('Conversation state persistence failed', exc_info=True)
         return TurnResult(message=message, status=status, state=state, engine=engine,
                           public_messages=list(public_messages), metrics={
             'observed_iterations': iterations,
@@ -653,7 +664,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 node = recorder.bundle('conversation_message', 'conversation_context', 'user',
                                        messages[-1]['content'], [parent] if parent else [])
                 recorder.attach(messages[-1], node)
-        if state.plan or state.notes or references:
+        if state.plan or state.notes or references or state.previous_interruption is not None:
             evidence = []
             for ref in references:
                 locator = _reference_for_tools(ref, ctx.tool_dispatch)
@@ -662,8 +673,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     evidence.append({'locator': locator, **source.model_dump(exclude_none=True)})
                 else:
                     evidence.append(locator)
-            prior_json = json.dumps({**_bounded_state(state), 'evidence': evidence},
-                                    ensure_ascii=False).replace('<', r'\u003c')
+            prior = {**_bounded_state(state), 'evidence': evidence}
+            if state.previous_interruption is not None:
+                prior['previous_interruption'] = state.previous_interruption.model_dump()
+            prior_json = json.dumps(prior, ensure_ascii=False).replace('<', r'\u003c')
             messages.append({'role': 'user', 'content':
                 '<prior_state_context>\n' + prior_json + '\n</prior_state_context>'})
             if recorder is not None:
