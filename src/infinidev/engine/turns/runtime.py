@@ -1168,6 +1168,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             recalled_files: dict[str, EvidenceSource] = {}
             readback_revisions: set[str] = set()
             read_batch: list[str] | None = []
+            checkpoint_pending = False
             for call, args in validated:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
@@ -1261,6 +1262,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                 read_archives.pop(next(iter(read_archives)))
                     if reference:
                         if call.function.name not in {'finish_turn', 'update_plan'}:
+                            checkpoint_pending |= reference not in state.evidence_sources
                             source = state.evidence_sources.get(reference) or _evidence_source(
                                 call.function.name, args, workspace_path, file_read)
                             retain_evidence(reference, source)
@@ -1268,6 +1270,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         verification.observation.locator = reference or None
                     if workspace_effect or state.plan is not previous_plan:
                         persist_work(checkpoint=True)
+                        checkpoint_pending = False
                     if output_retries == 1:
                         workspace_effect_since_cutoff |= workspace_effect
                 archive_metadata = {'_archive_reference': reference, '_archive_characters': len(body)}
@@ -1294,6 +1297,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     else:
                         receipt['closure'] = 'finish_turn'
                         return outcome('answered', state.reply or '')
+            if checkpoint_pending:
+                persist_work(checkpoint=True)
             read_repetition.observe_batch(read_batch)
             messages.extend(pending_images)
             if readback_pending is not None:

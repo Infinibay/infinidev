@@ -27,6 +27,12 @@ and reports interruption. Host permissions, cancellation, and resource limits re
 authoritative. An end-instruction hook can continue once within the same cancellation
 scope and remaining model/tool budgets.
 
+At the end of a tool batch that adds archive locators, the principal saves an
+unclosed checkpoint before requesting the model again. This includes batches
+that only read files or search. A resumed turn can recover that evidence by
+locator after an unexpected process exit. Workspace actions and plan updates
+still checkpoint as they occur.
+
 When the tool limit stops an otherwise valid batch, the transcript marks any
 remaining calls as unexecuted. If a tool was dispatched and the model still
 has a request available, the principal can use one request with no tool

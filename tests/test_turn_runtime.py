@@ -291,13 +291,16 @@ def test_followup_receives_host_interruption_without_private_model_content(runti
     assert not any('previous_interruption' in m['content'] for m in seen[-1][0])
 
 
-def test_plan_and_write_evidence_survive_hard_process_exit(runtime, tool_context, temp_db):
+@pytest.mark.parametrize('read_only', [False, True])
+def test_completed_batch_evidence_survives_hard_process_exit(runtime, tool_context, temp_db,
+                                                            read_only):
     from pathlib import Path
     import os
     import subprocess
     import sys
 
     from infinidev.db.service import get_session_runtime_state
+    from infinidev.tools.meta.recall_context_tool import RecallContextTool
 
     engine, agent, script, seen = runtime
     child = '''
@@ -310,9 +313,10 @@ from infinidev.engine import working_memory
 from infinidev.engine.turns import runtime
 from infinidev.tools.base.context import set_context
 from infinidev.tools.file.edit_file_tool import EditFileTool
+from infinidev.tools.file.read_file_tool import ReadFileTool
 from tests.test_turn_runtime import LoopEngine, reply, tc
 
-session, agent_id, workspace = sys.argv[1:]
+session, agent_id, workspace, mode = sys.argv[1:]
 settings.SANDBOX_ENABLED = False
 settings.FILE_OPERATIONS_PERMISSION = "allowed_paths"
 settings.ALLOWED_FILE_PATHS = [os.path.join(workspace, "sample.txt")]
@@ -324,11 +328,16 @@ runtime.get_litellm_params = lambda: {"model": "scripted"}
 runtime.get_model_capabilities = lambda: SimpleNamespace(
     supports_function_calling=True, supports_vision=False)
 runtime._get_model_max_context = lambda params: 262144
-calls = iter([
-    reply("", tc("update_plan", plan=[
-        {"id": "verify", "title": "Verify the edit", "status": "pending"}])),
-    reply("", tc("edit_file", file_path="sample.txt", old_string="line one", new_string="edited")),
-])
+if mode == "read":
+    tools = [ReadFileTool()]
+    calls = iter([reply("", tc("read_file", file_path="sample.txt", limit=1))])
+else:
+    tools = [EditFileTool()]
+    calls = iter([
+        reply("", tc("update_plan", plan=[
+            {"id": "verify", "title": "Verify the edit", "status": "pending"}])),
+        reply("", tc("edit_file", file_path="sample.txt", old_string="line one", new_string="edited")),
+    ])
 
 def call(*args, **kwargs):
     response = next(calls, None)
@@ -339,34 +348,45 @@ def call(*args, **kwargs):
 
 runtime.call_llm = call
 agent = SimpleNamespace(agent_id=agent_id, project_id=1, role="developer", backstory="Helper",
-                        workspace_path=workspace, tools=[EditFileTool()])
-LoopEngine().run_turn(agent, "Edit and verify")
+                        workspace_path=workspace, tools=tools)
+LoopEngine().run_turn(agent, "Inspect the sample" if mode == "read" else "Edit and verify")
 '''
     process = subprocess.run(
         [sys.executable, '-c', child, tool_context.session_id,
-         agent.agent_id, agent.workspace_path],
+         agent.agent_id, agent.workspace_path, 'read' if read_only else 'edit'],
         cwd=Path(__file__).resolve().parents[1],
         env={**os.environ, 'INFINIDEV_DB_PATH': temp_db, 'LITELLM_LOCAL_MODEL_COST_MAP': 'True'},
         capture_output=True, timeout=30, check=False,
     )
     assert process.returncode == 73, process.stderr.decode(errors='replace')
-    assert (Path(agent.workspace_path) / 'sample.txt').read_text().startswith('edited\n'), (
+    first_line = 'line one\n' if read_only else 'edited\n'
+    assert (Path(agent.workspace_path) / 'sample.txt').read_text().startswith(first_line), (
         process.stderr.decode(errors='replace')
     )
     saved = get_session_runtime_state(tool_context.session_id)['ui_state']['conversation']
     assert saved['receipt']['closure'] == 'unclosed'
     assert 'status' not in saved['receipt']
     ref, = saved['evidence']
-    assert saved['evidence_sources'][ref] == {'tool': 'edit_file', 'requested_path': 'sample.txt'}
+    source = saved['evidence_sources'][ref]
+    assert source['tool'] == ('read_file' if read_only else 'edit_file')
+    assert source['requested_path'] == 'sample.txt'
 
-    script(reply('The next step is verification.'))
-    assert engine.run_turn(agent, 'What remains?').status == 'answered'
-    prior = next(m['content'] for m in seen[-1][0] if
+    reference = ref.split('reference: ', 1)[1].removesuffix(']')
+    script(reply('', tc('recall_context', reference=reference)),
+           reply('', tc('finish_turn', message='Recovered the checkpoint.')))
+    assert engine.run_turn(agent, 'Continue from the saved evidence.',
+                           task_tools=[RecallContextTool()]).status == 'answered'
+    prior = next(m['content'] for m in seen[-2][0] if
                  m['content'].startswith('<prior_state_context>'))
     state = json.loads(prior.splitlines()[1])
-    assert state['plan'] == [{'id': 'verify', 'title': 'Verify the edit', 'status': 'pending'}]
+    expected_plan = [] if read_only else [
+        {'id': 'verify', 'title': 'Verify the edit', 'status': 'pending'},
+    ]
+    assert state['plan'] == expected_plan
     assert state['previous_checkpoint'] == {'closure': 'unclosed', 'dispatches': 1}
     assert 'previous_interruption' not in state
+    recalled = next(m['content'] for m in seen[-1][0] if m['role'] == 'tool')
+    assert ('line one' if read_only else 'modified') in json.loads(recalled)['content']
 
 
 @pytest.mark.parametrize('other_closure', ['unclosed', 'finish_turn'])
