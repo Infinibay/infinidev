@@ -42,9 +42,7 @@ from infinidev.engine.tool_dispatch import execute_tool_call
 from infinidev.engine.tool_executor import (
     WRITE_TOOLS,
     batch_tool_calls,
-    capture_pre_content,
     execute_tool_calls_parallel,
-    maybe_emit_file_change,
     update_opened_files_cache,
 )
 from infinidev.tools.base.context import get_current_workspace_path
@@ -1144,10 +1142,6 @@ class ToolRunner:
             arguments = _repair_missing_edit_target(
                 ctx, tc.function.name, tc.function.arguments,
             )
-            tool = ctx.tool_dispatch.get(tc.function.name)
-            pre = capture_pre_content(
-                tc.function.name, arguments, ctx.file_tracker, tool=tool,
-            )
             hook_meta["call_num"] = action_tool_calls + offset + 1
             hook_meta["total_calls"] = ctx.state.total_tool_calls + offset + 1
             attachments: list = []
@@ -1156,11 +1150,8 @@ class ToolRunner:
                 ctx.tool_dispatch, tc.function.name, arguments,
                 hook_metadata=hook_meta,
                 attachments_out=attachments,
-            )
-            maybe_emit_file_change(
-                tc.function.name, arguments, result, pre,
-                ctx.file_tracker, ctx.project_id, ctx.agent_id,
-                self._engine._hooks, tool=tool,
+                file_tracker=ctx.file_tracker,
+                file_change_hooks=self._engine._hooks,
             )
             results.append((tc, result))
         return results

@@ -279,7 +279,7 @@ class TestApplyGuardrail:
         monkeypatch.setattr(gr, "_maybe_emit_file_change", lambda *args, **kwargs: None)
         executed: list[str] = []
 
-        def execute(_dispatch, name, _arguments):
+        def execute(_dispatch, name, _arguments, **kwargs):
             executed.append(name)
             return "ok"
 
@@ -338,7 +338,7 @@ class TestApplyGuardrail:
         monkeypatch.setattr(
             gr,
             "execute_tool_call",
-            lambda _dispatch, name, _arguments: executed.append(name) or "ok",
+            lambda _dispatch, name, _arguments, **kwargs: executed.append(name) or "ok",
         )
         ctx = _ctx()
         ctx.max_total_calls = 4

@@ -193,7 +193,7 @@ def test_retry_context_refreshes_source_changed_by_a_corrective_tool(
             )
         return _response("FIRST-DRAFT" if len(requests) == 2 else "CORRECTED")
 
-    def execute(*args):
+    def execute(*args, **kwargs):
         path.write_text("NEW_SOURCE = 1\n")
         if exit_code:
             return json.dumps({"error": "Command timed out after writing source"})

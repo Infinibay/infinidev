@@ -762,6 +762,77 @@ def test_serial_edit_captures_original_text_after_recovering_missing_path(
     assert '-line one' in diff and '+changed' in diff
 
 
+def test_serial_edit_tracks_path_selected_by_pre_tool_hook(
+    workspace_dir, bound_tool, monkeypatch, auto_approve_permissions,
+):
+    from infinidev.engine.hooks.hooks import HookEvent, hook_manager
+    from infinidev.tools.file.edit_file_tool import EditFileTool
+
+    actual = workspace_dir / 'selected.txt'
+    actual.write_text('original\n')
+
+    def select_path(hook):
+        if hook.event == HookEvent.PRE_TOOL and hook.tool_name == 'edit_file':
+            hook.arguments['file_path'] = actual.name
+
+    monkeypatch.setattr(hook_manager, 'dispatch', select_path)
+    tool = bound_tool(EditFileTool)
+    ctx = _ctx()
+    ctx.tool_dispatch[tool.name] = tool
+    action = _call('edit', tool.name, json.dumps({
+        'file_path': 'sample.txt', 'old_string': 'original', 'new_string': 'updated',
+    }))
+
+    [(_, result)] = ToolRunner(_engine())._run_serial(ctx, [action], {}, 0, {})
+
+    assert json.loads(result)['action'] == 'modified'
+    assert actual.read_text() == 'updated\n'
+    assert ctx.file_tracker.get_change_count(str(workspace_dir / 'sample.txt')) == 0
+    diff = ctx.file_tracker.get_diff(str(actual))
+    assert '-original' in diff and '+updated' in diff
+
+
+@pytest.mark.parametrize('name', ['create_file', 'write_file'])
+def test_pod_creation_never_tracks_host_file_of_the_same_name(
+    name, workspace_dir, tmp_path_factory, monkeypatch, bound_tool, auto_approve_permissions,
+):
+    from infinidev.config.settings import settings
+    from infinidev.tools.file.create_file_tool import CreateFileTool
+
+    same_name = 'same.txt'
+    (workspace_dir / same_name).write_text('workspace counterpart\n')
+    host = tmp_path_factory.mktemp('host-with-counterpart')
+    (host / same_name).write_text('host counterpart\n')
+    monkeypatch.chdir(host)
+    monkeypatch.setattr(settings, 'SANDBOX_ENABLED', True)
+    observed = []
+    monkeypatch.setattr(
+        'infinidev.code_intel.file_change_notifications.record_text_integrity_baseline',
+        lambda path, text: observed.append(path),
+    )
+    requests = []
+
+    def pod_write(self, command, *, stdin_data):
+        requests.append(json.loads(stdin_data))
+        return SimpleNamespace(exit_code=0, stdout=json.dumps({
+            'ok': True, 'data': {'after_hash': 'fixture', 'size_bytes': 9},
+        }))
+
+    monkeypatch.setattr(CreateFileTool, '_exec_in_pod', pod_write)
+    tool = bound_tool(CreateFileTool)
+    ctx = _ctx()
+    ctx.tool_dispatch[tool.name] = tool
+    action = _call('create', name, json.dumps({'file_path': same_name, 'content': 'pod file\n'}))
+
+    [(_, result)] = ToolRunner(_engine())._run_serial(ctx, [action], {}, 0, {})
+
+    assert json.loads(result)['action'] == 'created'
+    assert requests == [{'op': 'write', 'file_path': same_name, 'content': 'pod file\n', 'mode': 'x'}]
+    assert observed == []
+    assert ctx.file_tracker.get_change_count(str(host / same_name)) == 0
+    assert ctx.file_tracker.get_change_count(str(workspace_dir / same_name)) == 0
+
+
 def test_shell_read_parser_abstains_on_pipeline_and_unknown_transform(tmp_path):
     path = tmp_path / "module.py"
     path.write_text("one\ntwo\n")

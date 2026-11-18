@@ -9,8 +9,10 @@ The legacy string adapter still returns the latest text for compatibility.
 from __future__ import annotations
 
 import logging
+from contextlib import AbstractContextManager, nullcontext
 from copy import copy
 from dataclasses import dataclass
+from threading import Event
 from typing import Any, Callable, Literal, TYPE_CHECKING
 
 from infinidev.engine.engine_logging import extract_tool_error
@@ -78,12 +80,14 @@ class _CorrectionSession:
         hooks: Any | None,
         build_context_messages: Callable[[], list[dict[str, Any]]] | None,
         run_tool: Callable[[str, str], str] | None,
+        tool_scope: Callable[[], AbstractContextManager[Event]] | None,
         is_cancelled: Callable[[], bool],
     ) -> None:
         self._ctx = ctx
         self._hooks = hooks
         self._build_context_messages = build_context_messages
         self._run_tool = run_tool
+        self._tool_scope = tool_scope or nullcontext
         self._is_cancelled = is_cancelled
         self._unbounded_tool_calls = 0
         self._action_tool_calls = 0
@@ -238,22 +242,33 @@ class _CorrectionSession:
         ctx = self._ctx
         name = call.function.name
         arguments = normalize_tool_arguments_json(call.function.arguments)
-        tool = ctx.tool_dispatch.get(name)
-        before = _capture_pre_content(name, arguments, ctx.file_tracker, tool=tool)
         self._action_tool_calls += 1
         self._unbounded_tool_calls += 1
         state = ctx.state
         total_calls = getattr(state, "total_tool_calls", None)
         if isinstance(total_calls, int):
             state.total_tool_calls = total_calls + 1
-        result = (
-            self._run_tool(name, arguments) if self._run_tool is not None
-            else execute_tool_call(ctx.tool_dispatch, name, arguments)
-        )
-        _maybe_emit_file_change(
-            name, arguments, result, before, ctx.file_tracker,
-            ctx.project_id, ctx.agent_id, self._hooks, tool=tool,
-        )
+        if self._run_tool is None:
+            with self._tool_scope() as cancel_event:
+                if cancel_event is not None and cancel_event.is_set():
+                    return '{"error": "cancelled"}'
+                result = execute_tool_call(
+                    ctx.tool_dispatch, name, arguments,
+                    hook_metadata={
+                        "project_id": ctx.project_id, "agent_id": ctx.agent_id,
+                        "cancel_event": cancel_event,
+                    },
+                    file_tracker=ctx.file_tracker,
+                    file_change_hooks=self._hooks,
+                )
+        else:
+            tool = ctx.tool_dispatch.get(name)
+            before = _capture_pre_content(name, arguments, ctx.file_tracker, tool=tool)
+            result = self._run_tool(name, arguments)
+            _maybe_emit_file_change(
+                name, arguments, result, before, ctx.file_tracker,
+                ctx.project_id, ctx.agent_id, self._hooks, tool=tool,
+            )
         if getattr(state, "opened_files", None) is not None:
             if not extract_tool_error(result):
                 update_opened_files_cache(state, name, arguments, result)
@@ -288,6 +303,7 @@ def evaluate_guardrail(
     hooks: Any | None = None,
     build_context_messages: Callable[[], list[dict[str, Any]]] | None = None,
     run_tool: Callable[[str, str], str] | None = None,
+    tool_scope: Callable[[], AbstractContextManager[Event]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> GuardrailOutcome:
     """Decide acceptance independently of the correction's model/tool mechanics."""
@@ -300,7 +316,7 @@ def evaluate_guardrail(
     correction_limit = max(0, int(ctx.guardrail_max_retries))
     corrections = _CorrectionSession(
         ctx, hooks=hooks, build_context_messages=build_context_messages,
-        run_tool=run_tool, is_cancelled=cancelled,
+        run_tool=run_tool, tool_scope=tool_scope, is_cancelled=cancelled,
     )
     exhaustion_reason = ""
     for attempt in range(correction_limit + 1):

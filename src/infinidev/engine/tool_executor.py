@@ -526,9 +526,13 @@ def _tracked_file_path(
         return None
     try:
         path = os.path.expanduser(authored_path)
-        resolve = getattr(tool, "_resolve_path", None)
+        resolve = getattr(tool, "_host_tracking_path", None)
+        if not callable(resolve):
+            resolve = getattr(tool, "_resolve_path", None)
         if callable(resolve):
             path = resolve(path)
+            if path is None:
+                return None
         elif not os.path.isabs(path):
             workspace = get_current_workspace_path()
             if not workspace and tracker.baseline is not None:

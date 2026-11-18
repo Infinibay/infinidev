@@ -26,7 +26,8 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from infinidev.config.settings import settings
@@ -2331,17 +2332,13 @@ class LoopEngine(AgentEngine):
             self._inject_mid_step_user_messages(ctx, messages)
             return messages
 
-        def run_correction_tool(name: str, arguments: str) -> str:
-            from infinidev.engine.tool_dispatch import execute_tool_call
-
+        @contextmanager
+        def correction_tool_scope() -> Iterator[threading.Event]:
             self._begin_tool_batch()
             try:
                 if self.is_cancelled:
-                    return '{"error": "cancelled"}'
-                return execute_tool_call(
-                    ctx.tool_dispatch, name, arguments,
-                    hook_metadata={"cancel_event": self._tool_cancel_event},
-                )
+                    self._tool_cancel_event.set()
+                yield self._tool_cancel_event
             finally:
                 self._finish_tool_batch()
 
@@ -2349,6 +2346,6 @@ class LoopEngine(AgentEngine):
             ctx, result,
             hooks=self._hooks,
             build_context_messages=build_correction_messages,
-            run_tool=run_correction_tool,
+            tool_scope=correction_tool_scope,
             is_cancelled=lambda: self.is_cancelled,
         )

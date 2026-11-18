@@ -15,7 +15,7 @@ import os
 import re
 import uuid
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from infinidev.engine.schema_sanitizer import (
     _clean_schema,
@@ -33,6 +33,9 @@ from infinidev.engine.schema_sanitizer import (
     REMOVE_STEP_SCHEMA,
 )
 from infinidev.tools.shell.shell_invocation import split_leading_cd
+
+if TYPE_CHECKING:
+    from infinidev.engine.file_change_tracker import FileChangeTracker
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +381,9 @@ def execute_tool_call(
     arguments: str | dict[str, Any],
     hook_metadata: dict[str, Any] | None = None,
     attachments_out: list | None = None,
+    *,
+    file_tracker: FileChangeTracker | None = None,
+    file_change_hooks: object | None = None,
 ) -> str:
     """Execute a tool call and return the result as a string.
 
@@ -406,6 +412,8 @@ def execute_tool_call(
 
     if not isinstance(args, dict):
         return _rejected_call(name, hook_metadata, {"error": f"Expected dict arguments, got {type(args).__name__}"})
+
+    tracking_reason = (args.get("reason") or args.get("description")) if file_tracker else None
 
     # Reading a path is an intent models express more reliably than the
     # file-vs-directory distinction. Resolve that distinction from the
@@ -840,6 +848,8 @@ def execute_tool_call(
 
     # Execute
     cancelled_by_user = False
+    tracked_arguments = None
+    pre_content = None
     try:
         from infinidev.engine.tool_progress import (
             is_tool_cancelled,
@@ -852,7 +862,19 @@ def execute_tool_call(
             ctx.agent_id,
             cancel_event=ctx.metadata.get("cancel_event"),
         ):
-            result = None if is_tool_cancelled() else tool._run(**args)
+            result = None
+            if not is_tool_cancelled():
+                if file_tracker is not None:
+                    from infinidev.engine.tool_executor import FILE_CHANGE_TOOLS, capture_pre_content
+
+                    if name in FILE_CHANGE_TOOLS and file_tracker.active:
+                        tracked_arguments = dict(args)
+                        if tracking_reason:
+                            tracked_arguments.setdefault("reason", tracking_reason)
+                        pre_content = capture_pre_content(
+                            name, tracked_arguments, file_tracker, tool=tool,
+                        )
+                result = tool._run(**args)
             cancelled_by_user = is_tool_cancelled()
         # Unwrap ToolResult (text + optional image attachments). The text
         # goes into the role=tool message; attachments are surfaced via
@@ -886,6 +908,13 @@ def execute_tool_call(
     ctx.event = HookEvent.POST_TOOL
     ctx.result = result_str
     hook_manager.dispatch(ctx)
+    if tracked_arguments is not None and not cancelled_by_user:
+        from infinidev.engine.tool_executor import maybe_emit_file_change
+
+        maybe_emit_file_change(
+            name, tracked_arguments, ctx.result, pre_content, file_tracker,
+            ctx.project_id, ctx.agent_id, file_change_hooks, tool=tool,
+        )
     return ctx.result
 
 

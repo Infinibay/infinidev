@@ -23,6 +23,11 @@ class CreateFileTool(InfinibayBaseTool):
     description: str = "Create a new file. Fails if the file already exists."
     args_schema: Type[BaseModel] = CreateFileInput
 
+    def _host_tracking_path(self, path: str) -> str | None:
+        if self._is_pod_mode():
+            return None
+        return self._resolve_path(path)
+
     def _run(self, file_path: str, content: str) -> str:
         file_path = self._resolve_path(os.path.expanduser(file_path))
 
