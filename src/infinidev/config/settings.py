@@ -198,6 +198,7 @@ class Settings(BaseSettings):
     # /effort validates model-specific levels; custom selects a token budget.
     THINKING_BUDGET: str = "medium"
     THINKING_BUDGET_TOKENS: int = 4096  # Used when THINKING_BUDGET="custom"
+    OPENAI_COMPATIBLE_TEMPLATE_EFFORT: bool = False
 
     # Embedding / Knowledge
     EMBEDDING_PROVIDER: str = "ollama"

@@ -38,6 +38,10 @@ class EffortProfile:
 def effort_profile(provider: str | None = None, model: str | None = None) -> EffortProfile:
     provider = provider or settings.LLM_PROVIDER
     slug = (model or settings.LLM_MODEL).rsplit("/", 1)[-1].lower()
+    if (provider == settings.LLM_PROVIDER == "openai_compatible"
+            and settings.LLM_BASE_URL and settings.OPENAI_COMPATIBLE_TEMPLATE_EFFORT):
+        return EffortProfile(("none", *_THREE), "template_effort",
+                             "chat_template_kwargs.reasoning_effort (endpoint opt-in)")
     if provider == "openai_subscription":
         from infinidev.config.codex_catalog import reasoning_levels
 
@@ -186,6 +190,9 @@ def apply_reasoning(kwargs: dict[str, Any], provider: str, model: str,
     profile = effort_profile(provider, model)
     if not profile.choices:
         return False
+    if (provider == "openai_compatible"
+            and str(kwargs.get("api_base") or "").rstrip("/") != settings.LLM_BASE_URL.rstrip("/")):
+        return False
     requested = settings.THINKING_BUDGET.lower().strip()
     enabled = settings.THINKING_ENABLED if enabled is None else enabled
     value = resolve_effort(profile, requested, enabled=enabled)
@@ -239,10 +246,13 @@ def apply_reasoning(kwargs: dict[str, Any], provider: str, model: str,
             "none" if off else "high")
     elif mechanism.startswith("template_"):
         template = kwargs.setdefault("extra_body", {}).setdefault("chat_template_kwargs", {})
-        if mechanism == "template_effort":
-            template["reasoning_effort"] = value
-        else:
+        if not profile.always_on:
             template["enable_thinking"] = not off
+        if mechanism == "template_effort":
+            if off:
+                template.pop("reasoning_effort", None)
+            else:
+                template["reasoning_effort"] = value
     elif mechanism == "gemini_level":
         kwargs.pop("thinking", None)
         kwargs["reasoning_effort"] = value
@@ -374,8 +384,9 @@ def effort_in_effect() -> str:
     profile = effort_profile()
     if not profile.choices:
         return profile.description
-    probe: dict[str, Any] = {}
+    probe: dict[str, Any] = {"api_base": settings.LLM_BASE_URL}
     apply_reasoning(probe, settings.LLM_PROVIDER, settings.LLM_MODEL)
+    probe.pop("api_base")
     value = resolve_effort(profile, settings.THINKING_BUDGET,
                            enabled=settings.THINKING_ENABLED)
     suffix = " (reasoning cannot be disabled)" if profile.always_on else ""

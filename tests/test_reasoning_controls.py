@@ -60,6 +60,101 @@ def test_exact_model_choices(provider, model, choices):
     assert effort_profile(provider, model).choices == tuple(choices.split())
 
 
+@pytest.fixture
+def compatible_effort_route(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setattr(settings, "LLM_MODEL", "custom_openai/Qwen3.8-FN-UD-IQ4_XS")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "http://127.0.0.1:48129/v1")
+    monkeypatch.setattr(settings, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "LLM_TEMPERATURE", 0.2)
+    monkeypatch.setattr(settings, "THINKING_BUDGET", "low")
+    monkeypatch.setattr(settings, "OPENAI_COMPATIBLE_TEMPLATE_EFFORT", True)
+
+
+@pytest.mark.parametrize("opted_in,level,enabled,template", [
+    (False, "medium", None, {"enable_thinking": False}),
+    (True, "low", None, {"enable_thinking": True, "reasoning_effort": "low"}),
+    (True, "high", None, {"enable_thinking": True, "reasoning_effort": "high"}),
+    (True, "none", None, {"enable_thinking": False}),
+    (True, "low", False, {"enable_thinking": False}),
+])
+def test_compatible_template_effort_reaches_native_tool_http_request(
+    monkeypatch, compatible_effort_route, opted_in, level, enabled, template,
+):
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.config import model_capabilities
+    from infinidev.engine.llm_client import call_llm
+
+    monkeypatch.setattr(settings, "OPENAI_COMPATIBLE_TEMPLATE_EFFORT", opted_in)
+    monkeypatch.setattr(settings, "THINKING_BUDGET", level)
+    monkeypatch.setattr(model_capabilities, "get_model_capabilities",
+                        lambda: model_capabilities.ModelCapabilities())
+    requests = []
+
+    def send(client, request, *args, **kwargs):
+        assert str(request.url) == f"{settings.LLM_BASE_URL}/chat/completions"
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, request=request, json={
+            "id": "chatcmpl-test", "object": "chat.completion", "created": 1,
+            "model": "Qwen3.8-FN-UD-IQ4_XS",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"},
+                         "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 8, "completion_tokens": 1, "total_tokens": 9},
+        })
+
+    monkeypatch.setattr(httpx.Client, "send", send)
+    messages = [{"role": "user", "content": "Inspect the fixture."}]
+    tools = [{"type": "function", "function": {
+        "name": "inspect_fixture", "parameters": {"type": "object", "properties": {}},
+    }}]
+    call_llm(get_litellm_params(), messages, tools, thinking_enabled=enabled, retry_attempts=1)
+
+    [payload] = requests
+    assert payload["chat_template_kwargs"] == template
+    expected_prompt = "Inspect the fixture." if opted_in else "/no_think\nInspect the fixture."
+    assert payload["messages"] == [{"role": "user", "content": expected_prompt}]
+    assert payload["tools"] == tools
+    assert payload["temperature"] == 0.2
+    assert effort_profile().choices == (("none", "low", "medium", "high") if opted_in else ())
+
+
+def test_compatible_template_effort_does_not_follow_helper_to_other_endpoint(
+    compatible_effort_route,
+):
+    from infinidev.config.llm import apply_provider_transport
+
+    main = {"model": settings.LLM_MODEL, "api_base": settings.LLM_BASE_URL}
+    helper = {**main, "api_base": "http://127.0.0.1:48130/v1"}
+
+    apply_provider_transport(main, "openai_compatible")
+    apply_provider_transport(helper, "openai_compatible")
+
+    assert main["extra_body"]["chat_template_kwargs"]["reasoning_effort"] == "low"
+    assert "extra_body" not in helper
+
+
+def test_compatible_capability_probe_disables_opted_in_thinking(
+    monkeypatch, compatible_effort_route,
+):
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.config import model_capabilities
+
+    requests = []
+
+    def run_probes(params):
+        requests.append(params)
+        return model_capabilities.ModelCapabilities(supports_function_calling=True)
+
+    monkeypatch.setattr(model_capabilities, "_run_probes", run_probes)
+    capabilities = model_capabilities._detect_openai_compatible_capabilities()
+
+    assert capabilities.supports_function_calling
+    assert requests[0]["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert get_litellm_params()["extra_body"]["chat_template_kwargs"] == {
+        "enable_thinking": True, "reasoning_effort": "low",
+    }
+
+
 @pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"])
 @pytest.mark.parametrize("level", ["low", "medium", "high", "xhigh", "max"])
 def test_openai_levels_survive_actual_responses_bridge(monkeypatch, model, level):

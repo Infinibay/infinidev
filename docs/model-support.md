@@ -114,9 +114,18 @@ con `thinking_budget`. El modelo 2.4T requiere thinking; los otros permiten `off
 | Ollama GPT-OSS | think: low, medium, high |
 | Ollama con thinking booleano | think: true/false |
 | llama.cpp / vLLM, modelos identificados | chat_template_kwargs del modelo |
+| OpenAI Compatible con soporte de plantilla activado | chat_template_kwargs.reasoning_effort |
 | DeepSeek V4 | thinking.type y reasoning_effort low/high/max |
 | Mistral Small / Medium 3.5 con esfuerzo | reasoning_effort none/high |
 | Modelo o API sin contrato conocido | no se ofrecen valores inventados |
+
+Para un endpoint OpenAI Compatible que admita niveles en `chat_template_kwargs`
+(como Strata con Qwen3.8), activa `INFINIDEV_OPENAI_COMPATIBLE_TEMPLATE_EFFORT=true`.
+Luego selecciona `/effort low`. Para fijarlo al iniciar, usa
+`INFINIDEV_THINKING_ENABLED=true` e `INFINIDEV_THINKING_BUDGET=low`.
+Los valores disponibles son `none`, `low`, `medium` y `high`. El ajuste aplica a
+las peticiones al endpoint configurado. El nivel indica el esfuerzo que se pide
+al modelo, y el servidor aplica el límite de salida de cada petición.
 
 OpenRouter distingue modelos con razonamiento obligatorio, esfuerzos enumerados y
 presupuestos. El catálogo se consulta sin credenciales y se conserva cinco minutos;

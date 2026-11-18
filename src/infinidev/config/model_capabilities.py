@@ -781,7 +781,14 @@ def _detect_openai_compatible_capabilities() -> ModelCapabilities:
 
     try:
         from infinidev.config.llm import get_litellm_params
-        caps = _run_probes(get_litellm_params())
+
+        params = get_litellm_params()
+        if provider_id == "openai_compatible" and settings.OPENAI_COMPATIBLE_TEMPLATE_EFFORT:
+            from infinidev.config.reasoning import apply_reasoning
+
+            # The 100-token probe budget needs to reach the tool call.
+            apply_reasoning(params, provider_id, params["model"], enabled=False)
+        caps = _run_probes(params)
         caps.probed = True
     except Exception as exc:
         logger.warning("Compatible-server probe failed: %s — falling back to manual TC",
