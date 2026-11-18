@@ -173,6 +173,65 @@ def test_exact_catalog_roles_and_choice_survive_real_http(
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
 
 
+@pytest.mark.parametrize('content', [
+    'Synthetic request.',
+    'Explain the Python string literal "/no_think".',
+    [
+        {'type': 'text', 'text': 'Inspect this fixture.'},
+        {'type': 'image_url', 'image_url': {'url': 'https://example.invalid/fixture.png'}},
+    ],
+])
+def test_thinking_controls_preserve_user_content_across_requests(
+        monkeypatch, local_completion_endpoint, content):
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.config.settings import settings
+    from infinidev.engine.llm_client import call_llm
+
+    endpoint, requests, _, _ = local_completion_endpoint
+    messages, schemas = synthetic_request(monkeypatch, endpoint, True)
+    monkeypatch.setattr(settings, 'LLM_MODEL', 'custom_openai/synthetic-large')
+    monkeypatch.setattr(settings, 'LLM_TEMPERATURE', 0.0)
+    monkeypatch.setattr(settings, 'THINKING_BUDGET', 'medium')
+    messages[-1]['content'] = content
+    original = copy.deepcopy(messages)
+    params = get_litellm_params()
+
+    call_llm(params, messages, schemas, thinking_enabled=False, retry_attempts=1)
+    after_suppression = copy.deepcopy(messages)
+    call_llm(params, messages, schemas, thinking_enabled=True, retry_attempts=1)
+
+    suppressed, normal = [payload for _, payload, _ in requests]
+    if isinstance(content, list):
+        expected = [{'type': 'text', 'text': '/no_think'}, *content]
+    else:
+        expected = '/no_think\n' + content
+    assert suppressed['messages'][-1]['content'] == expected
+    assert normal['messages'] == original
+    assert after_suppression == original
+    assert messages == original
+    assert suppressed['temperature'] == normal['temperature'] == 0.0
+
+
+def test_thinking_override_does_not_change_shared_provider_parameters(
+        monkeypatch, local_completion_endpoint):
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.config.settings import settings
+    from infinidev.engine.llm_client import call_llm
+
+    endpoint, requests, _, _ = local_completion_endpoint
+    messages, schemas = synthetic_request(monkeypatch, endpoint, True)
+    monkeypatch.setattr(settings, 'LLM_PROVIDER', 'llama_cpp')
+    params = get_litellm_params()
+    original = copy.deepcopy(params)
+    assert original['extra_body']['chat_template_kwargs']['enable_thinking'] is False
+
+    call_llm(params, messages, schemas, thinking_enabled=True, retry_attempts=1)
+
+    (_, payload, _), = requests
+    assert payload['chat_template_kwargs']['enable_thinking'] is True
+    assert params == original
+
+
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('fallback,required_supported,expected', [
     ('required', True, 'required'),

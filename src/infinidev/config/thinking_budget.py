@@ -250,13 +250,9 @@ def apply_thinking_budget(
         if preset == "low":
             # Inject /no_think to suppress thinking entirely
             _inject_prompt_tag(kwargs, "/no_think")
-        else:
-            # Make sure /no_think is NOT present, allow thinking
-            _remove_prompt_tag(kwargs, "/no_think")
-            if preset != "ultra" and tokens > 0:
-                # Output cap (thinking + response), clamped to the local
-                # context window so a 'high' preset can't crowd out the prompt.
-                kwargs["max_tokens"] = _budget_with_headroom(tokens, _local_ctx())
+        elif preset != "ultra" and tokens > 0:
+            # Output cap (thinking + response), clamped to the local context.
+            kwargs["max_tokens"] = _budget_with_headroom(tokens, _local_ctx())
         return
 
     # ── DeepSeek (native provider) ───────────────────────────────
@@ -282,10 +278,7 @@ def apply_thinking_budget(
             if tokens > 0:
                 kwargs["max_tokens"] = tokens * 2
         elif preset != "ultra" and tokens > 0:
-            _remove_prompt_tag(kwargs, "/no_think")
             kwargs["max_tokens"] = _budget_with_headroom(tokens, _local_ctx())
-        else:
-            _remove_prompt_tag(kwargs, "/no_think")
         return
 
     # ── Fallback for unknown providers ───────────────────────────
@@ -296,29 +289,29 @@ def apply_thinking_budget(
 # ── Prompt tag helpers ──────────────────────────────────────────────
 
 def _inject_prompt_tag(kwargs: dict[str, Any], tag: str) -> None:
-    """Inject a tag (e.g. /no_think) into the last user message."""
-    msgs = kwargs.get("messages")
-    if not msgs:
-        return
-    for i in range(len(msgs) - 1, -1, -1):
-        if msgs[i].get("role") == "user":
-            content = msgs[i].get("content", "")
-            if tag not in content:
-                msgs[i] = {**msgs[i], "content": tag + "\n" + content}
+    """Add a compatibility tag to the outgoing request without changing history."""
+    messages = kwargs.get("messages") or []
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            if content.partition("\n")[0] == tag:
+                return
+            tagged = tag + "\n" + content
+        elif isinstance(content, list):
+            first = content[0] if content else {}
+            if (isinstance(first, dict) and first.get("type") == "text"
+                    and str(first.get("text", "")).partition("\n")[0] == tag):
+                return
+            tagged = [{"type": "text", "text": tag}, *content]
+        else:
             return
-
-
-def _remove_prompt_tag(kwargs: dict[str, Any], tag: str) -> None:
-    """Remove a prompt tag from user messages if present."""
-    msgs = kwargs.get("messages")
-    if not msgs:
+        request_messages = list(messages)
+        request_messages[index] = {**message, "content": tagged}
+        kwargs["messages"] = request_messages
         return
-    for i in range(len(msgs) - 1, -1, -1):
-        if msgs[i].get("role") == "user":
-            content = msgs[i].get("content", "")
-            if tag in content:
-                msgs[i] = {**msgs[i], "content": content.replace(tag + "\n", "").replace(tag, "")}
-            return
 
 
 def _disable_thinking(

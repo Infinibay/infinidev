@@ -73,6 +73,38 @@ These were endpoint checks. The programming comparison varied temperature only.
 Separately, Strata's own OpenAI-compatible HTTP tests cover overriding server
 sampling defaults per request using a mock engine.
 
+A second temperature comparison used three editing tasks from
+`engine_eval_v8.tasks.jsonl` on Basalt 0.2.1 and Qwen3.8-FN-UD-IQ4_XS. Both
+arms had seed 147, automatic native tool choice, the same tool grant and a
+limit of 14 model iterations and 14 tool calls. The HTTP body contained the
+assigned temperature on every streaming request, including an explicit zero.
+The agent could run the visible pytest suite in an isolated fixture. A
+separate verifier, withheld during the turn, checked the final patch. Each
+verifier rejected its pristine fixture and accepted its reference solution.
+
+| Observation | 0.2 | 0 |
+| --- | ---: | ---: |
+| Final patch in scope passes the withheld verifier | 3/3 | 3/3 |
+| Visible pytest suite passes after the final edit | 2/3 | 3/3 |
+| Native `finish_turn` | 2/3 | 3/3 |
+| Model requests | 27 | 21 |
+
+`cart-immutability` accounted for the difference. At 0.2 it exhausted its
+budget after an additional edit, with a passing artifact and no check on that
+last revision. The other tasks were `pricing-rounding` and `options-override`.
+The sample is one run per task and temperature. The default remains 0.2.
+
+A separate comparison held temperature at 0.2 and seed at 147, and
+changed `chat_template_kwargs.enable_thinking` on the same Basalt endpoint.
+The first pass also sent Infinidev's legacy `/no_think` hint in both arms.
+The isolated run bypassed that shortcut in both arms, requested a 512-token
+reasoning budget, and verified the exact request fields over HTTP.
+Only the enabled arm returned content in the separate reasoning channel.
+Both arms passed the withheld verifier and the visible tests after the final
+edit in `cart-immutability` and `options-override`. The latter closed with
+`finish_turn` in both arms. The run confirms the control took effect
+while leaving the measured delivery count at 1/2 in both arms.
+
 The scope comparison authorizes the literal destination through the existing
 `allowed_paths` permission mode. The catalog and task stay fixed. The offline
 control attempts two edits to a protected file before successfully creating

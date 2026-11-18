@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from copy import deepcopy
 from typing import Any, Literal
 
 from infinidev.config.settings import settings
@@ -308,6 +309,9 @@ def call_llm(
             )))
 
     kwargs: dict[str, Any] = {**params, "messages": messages}
+    if "extra_body" in kwargs:
+        # Per-call reasoning and provider adapters can change nested options.
+        kwargs["extra_body"] = deepcopy(kwargs["extra_body"])
     # call_llm owns the retry loop. Leaving LiteLLM's retry budget enabled
     # here nests two exponential retry loops, turning three configured retries
     # into as many as twenty provider requests. Direct LiteLLM callers still
