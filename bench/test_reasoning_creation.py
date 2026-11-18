@@ -80,6 +80,9 @@ _ORDER = (
     ("catalog", "size", False), ("catalog", "size", True),
     ("catalog", "color", True), ("catalog", "color", False),
     ("metadata", "size", False), ("metadata", "size", True),
+    ("temperature", "timeout", False), ("temperature", "timeout", True),
+    ("temperature", "queue", True), ("temperature", "queue", False),
+    ("temperature", "label", False), ("temperature", "label", True),
 )
 
 
@@ -125,6 +128,7 @@ def test_creation(
     grant = [tool for tool in agent.tools
              if not (factor == "catalog" and treatment and tool.name == "edit_file")]
     metadata = not (factor == "metadata" and treatment)
+    temperature = 0.7 if factor == "temperature" and treatment else 0.2
     profiles = EffectivePromptConfiguration({"develop": {_CAPABILITY: PromptProfile()}})
     fragment = _BASE_FRAGMENT
     if factor == "profile" and treatment:
@@ -138,7 +142,7 @@ def test_creation(
         for name, value in {
             "LLM_PROVIDER": "openai_compatible", "LLM_MODEL": _MODEL,
             "LLM_BASE_URL": _ENDPOINT, "LLM_API_KEY": "local",
-            "LLM_NUM_RETRIES": 0, "LLM_TEMPERATURE": 0.2,
+            "LLM_NUM_RETRIES": 0, "LLM_TEMPERATURE": temperature,
         }.items():
             monkeypatch.setattr(settings, name, value)
         monkeypatch.setattr(turn_runtime, "get_litellm_params", _REAL_PARAMS)
@@ -170,6 +174,8 @@ def test_creation(
     dispatch = turn_runtime.execute_tool_call
 
     def observe_provider(params, messages, tools=None, **kwargs):
+        if live:
+            assert params["temperature"] == temperature
         offered.append([tool["function"]["name"] for tool in tools or []])
         return provider(params, messages, tools, **kwargs)
 
@@ -201,7 +207,8 @@ def test_creation(
         "factor": factor, "case": case, "treatment": treatment, "live": live,
         "task_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
         "profile_sha256": hashlib.sha256(fragment.encode()).hexdigest(),
-        "metadata": metadata, "offered": offered, "dispatches": dispatches,
+        "metadata": metadata, "temperature": temperature if live else None,
+        "offered": offered, "dispatches": dispatches,
         "semantic_match": match, "exact_files": exact, "status": result.status,
         "closure": engine._last_turn_receipt["closure"], "metrics": result.metrics,
         "seconds": round(time.monotonic() - started, 2),

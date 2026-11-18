@@ -40,7 +40,7 @@ workspace tools and checks resolved paths against each fixture. Inspect
 `CREATION_PROBE` rows for offered tools, dispatched tool names and hashes,
 artifact correctness, closure, budget, latency and tokens. No model text or
 tool bodies are written to the report. Use `-k profile`, `-k catalog` or
-`-k metadata` to select one comparison.
+`-k metadata` or `-k temperature` to select one comparison.
 
 The November 17 exploratory round used eight tool calls, nine model
 iterations and Qwen3.8-FN-UD-IQ4_XS. Each pair changed one factor:
@@ -57,6 +57,16 @@ file with either metadata schema. The initial ten live trials were
 discarded because their test configuration selected a pod backend unavailable
 in this checkout. These results describe this small set of tasks, model and
 budget. They do not justify changing the production prompt or tool policy.
+
+The temperature comparison keeps the enabled profile, tool grant and metadata
+schema fixed, and changes Infinidev's `LLM_TEMPERATURE` from 0.2 to 0.7.
+Neither value completed any of the three creation tasks. The benchmark checks
+the temperature in the actual runtime request parameters. A separate direct
+OpenAI-compatible request probe against Basalt 0.2.1 held the prompt and seed
+fixed. Two requests at 0 returned identical text hashes, and the request at
+1 returned a different hash. The server rejected invalid values of
+`temperature`, `top_p`, `top_k`, `min_p` and `seed` with field-specific
+HTTP 400 errors. Parameter support and programming quality are separate checks.
 
 ### What a task record means
 
