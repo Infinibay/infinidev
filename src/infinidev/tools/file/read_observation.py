@@ -42,11 +42,12 @@ def file_fingerprint(info: os.stat_result) -> str | None:
     return hashlib.sha256(repr(stamp).encode("ascii")).hexdigest()
 
 
-def read_observed_lines(stream: TextIO, path: str) -> list[str]:
+def read_observed_lines(
+    stream: TextIO, path: str,
+) -> tuple[list[str], FileReadObservation | None]:
     """Read normally and observe the opened file when the host requests it."""
-    observations = _observations.get()
-    if observations is None:
-        return stream.readlines()
+    if _observations.get() is None:
+        return stream.readlines(), None
     try:
         before = file_fingerprint(os.fstat(stream.fileno()))
     except OSError:
@@ -58,5 +59,12 @@ def read_observed_lines(stream: TextIO, path: str) -> list[str]:
         except OSError:
             after = None
         if before == after:
-            observations.append(FileReadObservation(path, before))
-    return lines
+            return lines, FileReadObservation(path, before)
+    return lines, None
+
+
+def record_file_read(observation: FileReadObservation) -> None:
+    """Record a stable observation when the tool delivers file content."""
+    observations = _observations.get()
+    if observations is not None:
+        observations.append(observation)

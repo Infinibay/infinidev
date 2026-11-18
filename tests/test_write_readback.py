@@ -1,4 +1,5 @@
 """The native turn can spend one request on observed-write verification."""
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,10 @@ from tests.test_turn_runtime import reply, runtime, tc
         ("missing_reader", False),
         ("failed_write", False),
         ("already_read", False),
+        ("unrelated_read", True),
+        ("empty_read", True),
+        ("empty_file", False),
+        ("read_then_edit", True),
         ("auto_only", False),
         ("other_provider", False),
         ("user_update", False),
@@ -64,8 +69,20 @@ def test_first_write_readback(
     if scenario == "edit":
         write = tc("edit_file", file_path=str(path), old_string="Pre-existing file.",
                    new_string="Expected bytes.")
-    read = tc("read_file", file_path=str(path))
-    first = reply("", write, read) if scenario == "already_read" else reply("", write)
+    if scenario == "empty_file":
+        write = tc("create_file", file_path=str(path), content="")
+    read = tc("read_file", file_path=path.name)
+    if scenario == "unrelated_read":
+        read = tc("read_file", file_path="sample.txt")
+    if scenario == "empty_read":
+        read = tc("read_file", file_path=path.name, limit=0)
+    batch = [write]
+    if scenario in {"already_read", "unrelated_read", "empty_read", "empty_file", "read_then_edit"}:
+        batch.append(read)
+    if scenario == "read_then_edit":
+        batch.append(tc("edit_file", file_path=path.name, old_string="Expected bytes.",
+                        new_string="Edited after the read."))
+    first = reply("", *batch)
 
     if scenario in {"user_update", "cancel_after_write"}:
         execute = turn_runtime.execute_tool_call
@@ -106,6 +123,13 @@ def test_first_write_readback(
     )
     if expect_named:
         assert seen[1][2]["named_choice_fallback"] == post_tool_choice
+        notice = seen[1][0][-1]["content"]
+        assert notice.startswith("<write_readback_context>\n")
+        assert json.loads(notice.splitlines()[1]) == {"file_path": path.name}
+        assert seen[1][0][-2]["role"] == "tool"
+    else:
+        assert not any((message.get("content") or "").startswith("<write_readback_context>")
+                       for message in seen[1][0])
     assert [schema["function"]["name"] for schema in seen[0][1]] == [
         schema["function"]["name"] for schema in seen[1][1]
     ]

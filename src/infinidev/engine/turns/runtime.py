@@ -268,20 +268,28 @@ def _evidence_source(
     return EvidenceSource(tool=name[:100], requested_path=path, file_fingerprint=fingerprint)
 
 
-def _file_revision_status(
-    source: EvidenceSource, workspace: str | None,
-) -> Literal['changed', 'unavailable'] | None:
-    if not workspace or not source.requested_path or not source.file_fingerprint:
+def _workspace_file_revision(workspace: str | None, path: str) -> tuple[str, str] | None:
+    if not workspace:
         return None
     try:
         root = Path(workspace).resolve(strict=True)
-        target = (root / source.requested_path).resolve(strict=True)
-        current = file_fingerprint(target.stat()) if target.is_relative_to(root) else None
+        target = (root / path).resolve(strict=True)
+        relative = target.relative_to(root).as_posix()
+        fingerprint = file_fingerprint(target.stat())
+        return (relative, fingerprint) if fingerprint is not None else None
     except (OSError, RuntimeError, ValueError):
-        current = None
-    if current is None:
+        return None
+
+
+def _file_revision_status(
+    source: EvidenceSource, workspace: str | None,
+) -> Literal['changed', 'unavailable'] | None:
+    if not source.requested_path or not source.file_fingerprint or not workspace:
+        return None
+    revision = _workspace_file_revision(workspace, source.requested_path)
+    if revision is None:
         return 'unavailable'
-    return 'changed' if current != source.file_fingerprint else None
+    return 'changed' if revision[1] != source.file_fingerprint else None
 
 
 def _recalled_file_source(
@@ -504,19 +512,25 @@ def _validated_arguments(ctx: Any, call: Any) -> dict[str, Any]:
     return args
 
 
-def _confirmed_file_write(name: str, body: str) -> bool:
+def _confirmed_write_target(name: str, body: str, workspace: str | None) -> str | None:
     expected = {'create_file': 'created', 'edit_file': 'modified'}.get(name)
     if expected is None:
-        return False
+        return None
     try:
         result = json.loads(body)
     except ValueError:
-        return False
-    return (
+        return None
+    if not (
         isinstance(result, dict) and 'error' not in result
         and result.get('action') == expected
         and isinstance(result.get('file_path'), str) and bool(result['file_path'])
-    )
+    ):
+        return None
+    revision = _workspace_file_revision(workspace, result['file_path'])
+    if revision is None:
+        return None
+    path = revision[0]
+    return path if redact(path) == path else None
 
 
 def _action_message(ctx: Any, result: LLMCallResult, calls: list[Any]) -> dict[str, Any]:
@@ -725,12 +739,13 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             tool_call_metadata=tool_call_metadata)
         readback_available = (
             settings.TASK_FIRST_WRITE_READBACK_ENABLED
+            and not settings.SANDBOX_ENABLED
             and not manual
             and not getattr(capabilities, 'restricts_tool_choice_to_auto', False)
             and provider_for_request(params, settings.LLM_PROVIDER) == 'openai_compatible'
             and 'read_file' in ctx.tool_dispatch
         )
-        readback_pending = False
+        readback_pending: str | None = None
         recorder = current_recorder()
         ctx.recording_run_id = receipt['run_id']
         ctx.recording_iteration = 0
@@ -807,7 +822,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
             if _drain_guidance(engine, messages, vision, _parent_guidance):
-                readback_pending = False
+                readback_pending = None
                 verification_dirty = True
             if max_iterations and iterations >= max_iterations:
                 return outcome('exhausted', 'Conversation interrupted: model call limit reached.')
@@ -817,7 +832,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 legacy_state.last_prompt_tokens, window,
             ):
                 _compact(messages)
-                readback_pending = False
+                readback_pending = None
             if verification is not None and verification_dirty:
                 verification_dirty = False
                 if verification.refresh():
@@ -835,14 +850,22 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             tool_choice: str | dict[str, Any] = (
                 post_tool_choice if legacy_state.total_tool_calls else 'auto'
             )
-            if readback_pending:
+            if readback_pending is not None:
                 if (
                     not ctx.manual_tc
                     and (not max_iterations or iterations < max_iterations)
                     and (not max_calls or legacy_state.total_tool_calls + 1 < max_calls)
                 ):
                     tool_choice = {'type': 'function', 'function': {'name': 'read_file'}}
-                readback_pending = False
+                    target = json.dumps({'file_path': readback_pending}, ensure_ascii=False)
+                    target = target.replace('<', r'\u003c')
+                    notice = {'role': 'user', 'content': '<write_readback_context>\n' + target
+                              + '\n</write_readback_context>'}
+                    messages.append(notice)
+                    if recorder is not None:
+                        recorder.attach(notice, recorder.source(
+                            'write_readback_context', 'user', notice['content']))
+                readback_pending = None
             trace('runtime_request', mode='manual' if ctx.manual_tc else 'function_calling',
                   requested_tool_choice=tool_choice,
                   finish_turn_offered=any(s['function']['name'] == 'finish_turn'
@@ -1024,6 +1047,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             messages.append(action)
             pending_images = []
             recalled_files: dict[str, EvidenceSource] = {}
+            readback_revisions: set[str] = set()
             for call, args in validated:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
@@ -1062,11 +1086,13 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                     'agent_id': agent.agent_id,
                                     'cancel_event': engine._tool_cancel_event},
                                 attachments_out=attachments)
-                        if readback_available and _confirmed_file_write(call.function.name, body):
-                            readback_available = False
-                            readback_pending = True
-                        elif call.function.name == 'read_file':
-                            readback_pending = False
+                        if readback_available:
+                            readback_pending = _confirmed_write_target(
+                                call.function.name, body, workspace_path)
+                            readback_available = readback_pending is None
+                        elif (readback_pending is not None and call.function.name == 'read_file'
+                              and len(file_reads) == 1):
+                            readback_revisions.add(file_reads[0].fingerprint)
                         if observer is not None:
                             observer.record('working', 'tool_completed', tool_name=call.function.name,
                                             progress=True)
@@ -1129,6 +1155,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         receipt['closure'] = 'finish_turn'
                         return outcome('answered', state.reply or '')
             messages.extend(pending_images)
+            if readback_pending is not None:
+                revision = _workspace_file_revision(workspace_path, readback_pending)
+                if revision is None or revision[1] in readback_revisions:
+                    readback_pending = None
             revision_notices = []
             for recalled_ref, source in recalled_files.items():
                 status = _file_revision_status(source, workspace_path)

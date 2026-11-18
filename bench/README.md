@@ -168,11 +168,13 @@ scoring still based on final source, observed readback and closure.
 ### Readback after an observed write
 
 `INFINIDEV_TASK_FIRST_WRITE_READBACK_ENABLED=true` enables an experiment for
-native OpenAI-compatible tools. After the first successful `create_file` or
-`edit_file` in a turn runtime invocation, the next request can select
-`read_file` by name. The model supplies the arguments and existing permissions
-apply. A subsequent `read_file` attempt in the same batch skips the request,
-regardless of its path or result. New user guidance, cancellation, context
+native OpenAI-compatible tools. After the first successful local `create_file`
+or `edit_file` within the workspace, the next request can select `read_file`
+by name and include the actual `file_path` from the observed write. The model
+supplies the arguments and existing permissions apply. A later read in the
+same batch skips the request when it observed the file's revision at the end
+of the batch. An unrelated read or a warning without any result leaves the
+check pending. New user guidance, cancellation, context
 compaction and limits that leave only one request or tool call also take
 precedence. If the endpoint rejects the selector with a parameter error, one
 extra HTTP request can restore ordinary native tool selection without spending
