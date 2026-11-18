@@ -10,6 +10,7 @@ import pytest
 
 from infinidev.config.settings import settings
 from infinidev.engine.test_environment import prepare_test_environment
+from infinidev.engine.tool_dispatch import execute_tool_call
 from infinidev.tools.base.context import set_repository_path
 from infinidev.tools.shell.execute_command import ExecuteCommandTool
 from infinidev.tools.shell.execute_command_input import ExecuteCommandInput
@@ -34,6 +35,37 @@ class TestExecuteCommand:
         description = ExecuteCommandInput.model_fields["cwd"].description
         assert description is not None
         assert "prior shell `cd` does not persist" in description
+
+    @pytest.mark.parametrize("target_repository", [False, True])
+    @pytest.mark.parametrize("use_prelude", [False, True])
+    def test_relative_cwd_uses_the_tools_repository_or_workspace(
+        self, target_repository, use_prelude, workspace_dir, tmp_path_factory,
+        monkeypatch, bound_tool, tool_context, auto_approve_permissions,
+    ):
+        host = tmp_path_factory.mktemp("host-cwd")
+        repository = workspace_dir / "repository"
+        for parent, marker in ((host, "host"), (workspace_dir, "workspace"),
+                               (repository, "repository")):
+            directory = parent / "nested"
+            directory.mkdir(parents=True)
+            (directory / "marker.txt").write_text(marker)
+        monkeypatch.chdir(host)
+        if target_repository:
+            set_repository_path(tool_context.agent_id, str(repository))
+        tool = bound_tool(ExecuteCommandTool)
+        check = "cat marker.txt"
+        args = {"command": f"cd nested && {check}"} if use_prelude else {
+            "command": check, "cwd": "nested",
+        }
+
+        dispatch = {tool.name: tool}
+        data = json.loads(execute_tool_call(dispatch, tool.name, args))
+
+        assert data["exit_code"] == 0
+        assert data["stdout"].strip() == ("repository" if target_repository else "workspace")
+        subsequent = json.loads(execute_tool_call(dispatch, tool.name, {"command": "pwd"}))
+        base = repository if target_repository else workspace_dir
+        assert subsequent["stdout"].strip() == str(base.resolve())
 
     def test_short_specific_rationale_is_valid(self):
         parsed = ExecuteCommandInput(command="pytest -q", rationale="Verify focused regression")

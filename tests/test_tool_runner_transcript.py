@@ -24,6 +24,8 @@ from infinidev.engine.loop.loop_guard import LoopGuard
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.tool_runner import ToolRunner
 from infinidev.engine.file_change_tracker import FileChangeTracker
+from infinidev.tools.base.context import set_repository_path
+from infinidev.tools.shell.execute_command import ExecuteCommandTool
 
 
 # ── fakes ────────────────────────────────────────────────────────────
@@ -713,6 +715,30 @@ def test_shell_cat_covers_later_ranges_and_respects_file_revision(tmp_path):
     cached, executable = runner._partition_repeated_reads(ctx, [subset])
     assert cached == []
     assert executable == [subset]
+
+
+def test_shell_read_delivery_is_scoped_to_the_target_repository(
+    workspace_dir, tool_context, bound_tool,
+):
+    repository = workspace_dir / "repository"
+    repository.mkdir()
+    (workspace_dir / "module.py").write_text("workspace\n")
+    (repository / "module.py").write_text("repository\n")
+    set_repository_path(tool_context.agent_id, str(repository))
+    tool = bound_tool(ExecuteCommandTool)
+    ctx = _ctx()
+    ctx.workspace_path = str(workspace_dir)
+    ctx.tool_dispatch[tool.name] = tool
+    runner = ToolRunner(_engine(nudge_at=99))
+    shell = _call("shell", "execute_command", '{"command":"cd . && cat module.py"}')
+    workspace_read = _call("workspace", "read_file", '{"file_path":"module.py","limit":1}')
+    repository_read = _call("repo", "read_file", '{"file_path":"repository/module.py","limit":1}')
+
+    runner._record_read_delivery(ctx, shell)
+    cached, executable = runner._partition_repeated_reads(ctx, [workspace_read, repository_read])
+
+    assert executable == [workspace_read]
+    assert [call for call, _ in cached] == [repository_read]
 
 
 def test_shell_read_parser_abstains_on_pipeline_and_unknown_transform(tmp_path):

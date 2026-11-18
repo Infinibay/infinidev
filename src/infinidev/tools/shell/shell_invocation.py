@@ -34,6 +34,16 @@ def split_leading_cd(command: str) -> tuple[str, str] | None:
     return match.group("command").strip(), path_tokens[0]
 
 
+def resolve_command_cwd(
+    cwd: str | None, *, repository_path: str | None, workspace_path: str | None,
+) -> str:
+    """Resolve a command directory against the active repository or workspace."""
+    if cwd and os.path.isabs(cwd):
+        return cwd
+    base = repository_path or workspace_path or os.getcwd()
+    return os.path.join(base, cwd) if cwd else base
+
+
 def shell_invocation(command: str) -> tuple[str | list[str], bool]:
     """Return subprocess args that propagate failure from any pipeline stage.
 
@@ -50,4 +60,4 @@ def shell_invocation(command: str) -> tuple[str | list[str], bool]:
     return [bash, "-o", "pipefail", "-c", command], False
 
 
-__all__ = ["shell_invocation", "split_leading_cd"]
+__all__ = ["resolve_command_cwd", "shell_invocation", "split_leading_cd"]

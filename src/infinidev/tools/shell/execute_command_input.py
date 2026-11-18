@@ -35,8 +35,8 @@ class ExecuteCommandInput(BaseModel):
         default=None,
         description=(
             "Working directory for this command. Every execute_command call starts "
-            "independently; a prior shell `cd` does not persist. Pass cwd explicitly "
-            "when the command must run in a repository or subdirectory."
+            "independently; a prior shell `cd` does not persist. Relative paths start "
+            "at the target repository or, if none is selected, the workspace."
         ),
     )
     env: dict[str, str] | None = Field(

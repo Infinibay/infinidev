@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.shell.shell_invocation import shell_invocation
+from infinidev.tools.shell.shell_invocation import resolve_command_cwd, shell_invocation
 from infinidev.tools.stdin_prompt import (
     has_stdin_input_handler,
     request_stdin_input,
@@ -272,8 +272,11 @@ class ExecuteCommandTool(InfinibayBaseTool):
         if perm_error:
             return self._error(perm_error)
 
-        if not cwd or not isinstance(cwd, str):
-            cwd = self.repository_path or self.workspace_path or os.getcwd()
+        cwd = resolve_command_cwd(
+            cwd if isinstance(cwd, str) else None,
+            repository_path=self.repository_path,
+            workspace_path=self.workspace_path,
+        )
 
         # Use shell=True to allow piping and other shell features,
         # since this is a local CLI for the user's own machine.

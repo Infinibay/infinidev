@@ -48,6 +48,7 @@ from infinidev.engine.tool_executor import (
     update_opened_files_cache,
 )
 from infinidev.tools.base.context import get_current_workspace_path
+from infinidev.tools.shell.shell_invocation import resolve_command_cwd, split_leading_cd
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.behavior_tracker import BehaviorTracker
@@ -780,10 +781,10 @@ class ToolRunner:
             return None
 
         command = args["command"]
-        cwd = args.get("cwd") if isinstance(args.get("cwd"), str) else None
-        if cwd is None:
-            from infinidev.tools.shell.shell_invocation import split_leading_cd
-
+        cwd = args.get("cwd")
+        if cwd is not None and not isinstance(cwd, str):
+            return None
+        if not cwd:
             split = split_leading_cd(command)
             if split is not None:
                 command, cwd = split
@@ -801,14 +802,14 @@ class ToolRunner:
         if not tokens:
             return None
 
-        workspace = (
-            getattr(ctx, "workspace_path", None)
-            or get_current_workspace_path()
-            or os.getcwd()
+        tool = ctx.tool_dispatch.get(tc.function.name)
+        base_dir = resolve_command_cwd(
+            cwd,
+            repository_path=getattr(tool, "repository_path", None),
+            workspace_path=(getattr(tool, "workspace_path", None)
+                            or getattr(ctx, "workspace_path", None)
+                            or get_current_workspace_path()),
         )
-        base_dir = cwd or workspace
-        if not os.path.isabs(base_dir):
-            base_dir = os.path.join(workspace, base_dir)
 
         base = os.path.basename(tokens[0])
         paths: list[str]
