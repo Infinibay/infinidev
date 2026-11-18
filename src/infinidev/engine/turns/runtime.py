@@ -47,6 +47,7 @@ from infinidev.engine.turns.models import (
     EvidenceSource, PreviousCheckpoint, PreviousInterruption, TestObservation, TurnResult,
     TurnState,
 )
+from infinidev.engine.turns.read_repetition import ReadRepetitionGuard, read_result_signature
 from infinidev.engine.turns.tools import build_turn_tools
 from infinidev.engine.turns.verification import TurnTestVerification, may_change_workspace
 from infinidev.engine.workspace_baseline import WorkspaceBaseline
@@ -858,17 +859,23 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         workspace_effect_since_cutoff = False
         reported_archive_revisions: dict[str, str] = {}
         prior_verification_status = verification.status if verification is not None else None
+        read_repetition = ReadRepetitionGuard()
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
             if _drain_guidance(engine, messages, vision, _parent_guidance):
                 readback_pending = None
                 verification_dirty = True
+                read_repetition.reset()
             if max_iterations and iterations >= max_iterations:
                 return outcome('exhausted', 'Conversation interrupted: model call limit reached.')
             reporting_only = bool(max_calls and legacy_state.total_tool_calls >= max_calls)
             if reporting_only and (invalid_batches or not receipt['dispatches']):
                 return outcome('exhausted', _TOOL_LIMIT_MESSAGE)
+            if not reporting_only and read_repetition.exhausted:
+                trace('read_repetition_cutoff')
+                return outcome('exhausted', 'Conversation interrupted: repeated read-only batches '
+                               'returned evidence already observed in this turn.')
             if not context_repaired and ContextManager.under_context_pressure(
                 legacy_state.last_prompt_tokens, window,
             ):
@@ -925,6 +932,14 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         recorder.attach(notice, recorder.source(
                             'workspace_verification', 'user', notice_text))
                     request_messages = [*messages, notice]
+            if not reporting_only and read_repetition.warn:
+                notice = {'role': 'user', 'content':
+                    'Host progress: repeated read-only batches returned evidence already observed. '
+                    'Try a different way to gather the missing evidence, or use finish_turn to '
+                    'report what you observed. Continuing to repeat these reads can stop the turn.'}
+                if recorder is not None:
+                    recorder.attach(notice, recorder.source('read_repetition', 'user', notice['content']))
+                request_messages = [*request_messages, notice]
             trace('runtime_request', mode='manual' if ctx.manual_tc else 'function_calling',
                   requested_tool_choice=tool_choice,
                   finish_turn_offered=not reporting_only and any(
@@ -1023,6 +1038,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             calls = result.tool_calls or []
             if not calls:
                 if _drain_guidance(engine, messages, vision, _parent_guidance):
+                    read_repetition.reset()
                     continue
                 if legacy_state.total_tool_calls:
                     if not ctx.manual_tc or not _protocol_payload(result.raw_content):
@@ -1145,6 +1161,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             pending_images = []
             recalled_files: dict[str, EvidenceSource] = {}
             readback_revisions: set[str] = set()
+            read_batch: list[str] | None = []
             for call, args in validated:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
@@ -1191,11 +1208,21 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                             progress=True)
                         if call.function.name not in {'finish_turn', 'update_plan'}:
                             receipt['dispatches'] += 1
+                            output_sha256 = hashlib.sha256(body.encode()).hexdigest()
                             trace('tool_result', source='dispatcher',
                                   call_id_sha256=hashlib.sha256(call.id.encode()).hexdigest(),
                                   tool=call.function.name,
-                                  output_sha256=hashlib.sha256(body.encode()).hexdigest(),
+                                  output_sha256=output_sha256,
                                   output_bytes=len(body.encode()))
+                            if read_batch is not None:
+                                signature = None if attachments else read_result_signature(
+                                    call.function.name, args, getattr(tool, 'effects', None),
+                                    body, output_sha256,
+                                )
+                                if signature is None:
+                                    read_batch = None
+                                else:
+                                    read_batch.append(signature)
                         if verification is not None:
                             new_test = (verification.observation is not None
                                         and verification.observation is not previous_test)
@@ -1244,9 +1271,12 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 if state.finished:
                     if _drain_guidance(engine, messages, vision, _parent_guidance):
                         state.finished, state.reply = False, None
+                        read_repetition.reset()
+                        read_batch = []
                     else:
                         receipt['closure'] = 'finish_turn'
                         return outcome('answered', state.reply or '')
+            read_repetition.observe_batch(read_batch)
             messages.extend(pending_images)
             if readback_pending is not None:
                 revision = _workspace_file_revision(workspace_path, readback_pending)

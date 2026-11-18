@@ -117,6 +117,13 @@ The first request uses `auto`. Tool grants and explicit `finish_turn` still appl
 If optional readback requests a named tool and the endpoint rejects that
 selector, its fallback honors the configured choice and provider capabilities.
 
+The principal warns after two consecutive batches of local reads that repeat
+both the calls and their observed results in this turn. Four such batches
+end the turn as exhausted, including when both numeric budgets are zero.
+New read evidence clears the warning. New user guidance and batches with
+other tool effects reset the observation window. The check runs after each
+batch, so writes in a mixed batch can complete before the next request.
+
 Set `INFINIDEV_TASK_TEST_REVISION_FEEDBACK_ENABLED=true` to observe test
 revisions in the principal engine. A recognised test command with an
 unambiguous zero exit is associated with the observed workspace when the
