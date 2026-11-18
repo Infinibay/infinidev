@@ -238,7 +238,8 @@ class _CorrectionSession:
         ctx = self._ctx
         name = call.function.name
         arguments = normalize_tool_arguments_json(call.function.arguments)
-        before = _capture_pre_content(name, arguments, ctx.file_tracker)
+        tool = ctx.tool_dispatch.get(name)
+        before = _capture_pre_content(name, arguments, ctx.file_tracker, tool=tool)
         self._action_tool_calls += 1
         self._unbounded_tool_calls += 1
         state = ctx.state
@@ -251,7 +252,7 @@ class _CorrectionSession:
         )
         _maybe_emit_file_change(
             name, arguments, result, before, ctx.file_tracker,
-            ctx.project_id, ctx.agent_id, self._hooks,
+            ctx.project_id, ctx.agent_id, self._hooks, tool=tool,
         )
         if getattr(state, "opened_files", None) is not None:
             if not extract_tool_error(result):

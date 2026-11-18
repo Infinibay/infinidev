@@ -795,19 +795,36 @@ def test_second_output_recovery_requires_a_changed_workspace_revision(
         assert file.read_text().startswith(expected + '\n')
 
 
-def test_actual_edit_emits_file_change_callback(runtime, auto_approve_permissions):
+@pytest.mark.parametrize('relative', [False, True])
+def test_actual_edit_emits_file_change_callback(
+    runtime, auto_approve_permissions, tmp_path_factory, monkeypatch, relative,
+):
     engine, agent, script, seen = runtime
     from pathlib import Path
     from infinidev.tools.file.edit_file_tool import EditFileTool
     target = Path(agent.workspace_path) / 'sample.txt'
+    host = tmp_path_factory.mktemp('other-cwd')
+    decoy = host / 'sample.txt'
+    decoy.write_text('different working directory\n')
+    monkeypatch.chdir(host)
     changed = []
     engine._hooks = SimpleNamespace(on_file_change=changed.append)
-    script(reply('', tc('edit_file', file_path=str(target), old_string='line one',
-                           new_string='changed')), reply('', tc('finish_turn', message='Done')))
+
+    def finish_after_edit():
+        assert changed == [str(target)]
+        tracker = engine._last_file_tracker
+        assert [path for path, _ in tracker.change_fingerprint()] == [str(target.resolve())]
+        diff = tracker.get_diff(str(target))
+        assert '-line one' in diff and '+changed' in diff
+        return reply('', tc('finish_turn', message='Done'))
+
+    script(reply('', tc('edit_file', file_path=target.name if relative else str(target),
+                           old_string='line one', new_string='changed')), finish_after_edit)
     result = engine.run_turn(agent, 'Edit', task_tools=[EditFileTool()])
     assert result.status == 'answered'
     assert target.read_text().startswith('changed\n')
     assert changed == [str(target)]
+    assert decoy.read_text() == 'different working directory\n'
 
 
 @pytest.mark.parametrize('manual', [False, True])

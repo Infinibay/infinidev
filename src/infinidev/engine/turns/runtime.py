@@ -1156,7 +1156,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                             engine._tool_cancel_event.set()
                         # Count attempts, including host-denied calls, against the global fuse.
                         legacy_state.total_tool_calls += 1
-                        pre_content = capture_pre_content(call.function.name, args, tracker)
+                        pre_content = capture_pre_content(call.function.name, args, tracker, tool=tool)
                         command = args.get('command')
                         test_attempt = (
                             verification is not None and call.function.name == 'execute_command'
@@ -1189,7 +1189,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                   output_sha256=hashlib.sha256(body.encode()).hexdigest(),
                                   output_bytes=len(body.encode()))
                         maybe_emit_file_change(call.function.name, args, body, pre_content,
-                            tracker, agent.project_id, agent.agent_id, engine._hooks)
+                            tracker, agent.project_id, agent.agent_id, engine._hooks, tool=tool)
                         if verification is not None:
                             if test_attempt:
                                 verification.observe_test(

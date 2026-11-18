@@ -741,6 +741,27 @@ def test_shell_read_delivery_is_scoped_to_the_target_repository(
     assert [call for call, _ in cached] == [repository_read]
 
 
+def test_serial_edit_captures_original_text_after_recovering_missing_path(
+    workspace_dir, bound_tool, auto_approve_permissions,
+):
+    from infinidev.tools.file.edit_file_tool import EditFileTool
+
+    target = workspace_dir / 'sample.txt'
+    tool = bound_tool(EditFileTool)
+    ctx = _ctx()
+    ctx.tool_dispatch[tool.name] = tool
+    ctx.state.opened_files[str(target)] = 'line one'
+    runner = ToolRunner(_engine())
+    action = _call('edit', tool.name, '{"old_string":"line one","new_string":"changed"}')
+
+    [(_, result)] = runner._run_serial(ctx, [action], {}, 0, {})
+
+    assert json.loads(result)['action'] == 'modified'
+    assert target.read_text().startswith('changed\n')
+    diff = ctx.file_tracker.get_diff(str(target))
+    assert '-line one' in diff and '+changed' in diff
+
+
 def test_shell_read_parser_abstains_on_pipeline_and_unknown_transform(tmp_path):
     path = tmp_path / "module.py"
     path.write_text("one\ntwo\n")

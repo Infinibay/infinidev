@@ -11,12 +11,14 @@ Handles:
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.engine_logging import emit_loop_event, extract_tool_error
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.tool_dispatch import execute_tool_call
+from infinidev.tools.base.context import get_current_workspace_path
 
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -509,29 +511,47 @@ def extract_file_path_from_args(tool_name: str, arguments: str | dict) -> str | 
         return None
     if not isinstance(args, dict):
         return None
-    return args.get("path") or args.get("file_path")
+    path = args.get("path") or args.get("file_path")
+    return path if isinstance(path, str) and path else None
+
+
+def _tracked_file_path(
+    tool_name: str, arguments: str | dict, tracker: FileChangeTracker, tool: Any,
+) -> str | None:
+    """Resolve the file in the same context as the dispatched write tool."""
+    if tool_name not in FILE_CHANGE_TOOLS or not tracker.active:
+        return None
+    authored_path = extract_file_path_from_args(tool_name, arguments)
+    if authored_path is None:
+        return None
+    try:
+        path = os.path.expanduser(authored_path)
+        resolve = getattr(tool, "_resolve_path", None)
+        if callable(resolve):
+            path = resolve(path)
+        elif not os.path.isabs(path):
+            workspace = get_current_workspace_path()
+            if not workspace and tracker.baseline is not None:
+                workspace = tracker.baseline.root
+            path = os.path.join(workspace or os.getcwd(), path)
+        return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+    except (OSError, TypeError, ValueError):
+        return None
 
 
 def capture_pre_content(
     tool_name: str,
     arguments: str | dict,
     tracker: FileChangeTracker,
+    *,
+    tool: Any = None,
 ) -> str | None:
     """Read file content before a write/edit tool mutates it."""
-    import os as _os
-    if tool_name not in FILE_CHANGE_TOOLS or not tracker.active:
-        return None
-    file_path = extract_file_path_from_args(tool_name, arguments)
-    if not file_path:
-        return None
-    try:
-        file_path = _os.path.abspath(_os.path.expanduser(file_path))
-    except (OSError, ValueError):
-        return None
-    if not _os.path.isfile(file_path):
+    file_path = _tracked_file_path(tool_name, arguments, tracker, tool)
+    if file_path is None or not os.path.isfile(file_path):
         return None  # new file — original is empty
     try:
-        size = _os.path.getsize(file_path)
+        size = os.path.getsize(file_path)
         if size > MAX_TRACK_FILE_SIZE:
             return None
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
@@ -569,6 +589,8 @@ def maybe_emit_file_change(
     project_id: int,
     agent_id: str,
     hooks: object | None = None,
+    *,
+    tool: Any = None,
 ) -> None:
     """After a write/edit tool call, record the change and emit a TUI event.
 
@@ -576,19 +598,14 @@ def maybe_emit_file_change(
     forward the absolute path so an OrchestrationHooks consumer (e.g.
     a UI WebSocket bridge) can render the change in real time.
     """
-    import os as _os
     if tool_name not in FILE_CHANGE_TOOLS or not tracker.active:
         return
 
     if extract_tool_error(result):
         return
 
-    file_path = extract_file_path_from_args(tool_name, arguments)
-    if not file_path:
-        return
-    try:
-        file_path = _os.path.abspath(_os.path.expanduser(file_path))
-    except (OSError, ValueError):
+    file_path = _tracked_file_path(tool_name, arguments, tracker, tool)
+    if file_path is None:
         return
 
     reason = extract_reason_from_args(arguments)
@@ -596,9 +613,9 @@ def maybe_emit_file_change(
         tracker.record_reason(file_path, reason)
 
     try:
-        if not _os.path.isfile(file_path):
+        if not os.path.isfile(file_path):
             return
-        size = _os.path.getsize(file_path)
+        size = os.path.getsize(file_path)
         if size > MAX_TRACK_FILE_SIZE:
             return
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
