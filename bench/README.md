@@ -431,6 +431,40 @@ the exact current value in the requested format, compared with zero controls.
 All four closed via `finish_turn`. This measures the follow-up after a stale
 recall, with one run per fixture and arm.
 
+### From a reference helper to the first edit
+
+A small Rust fixture reproduced the shape of a Bruma task. The user named a
+helper and insertion point, asked for a standalone cancellation test, and
+specified when to acknowledge output. The prior turn described a different
+PTY test. An obsolete file under `archive/` offered a decoy API. File tools ran against
+the reduced workspace and the evaluator compiled the first saved patch with
+`rustc --test` and ran the single new test in an isolated process.
+
+Both comparisons used Qwen3.8-FN-UD-IQ4_XS, temperature 0.2, native tools,
+eight tool calls and nine model requests at most. Each comparison paired
+seeds 147, 389 and 723. The first treatment repeated a short instruction in
+the request tail on the first three requests before an edit. It asked the
+model to read the named implementation, adapt the observed contract to the
+current request, and edit once the source answered its questions. The second
+comparison enabled `capability.progress_discipline` in both arms and tried
+similar guidance in that profile's system fragment. The HTTP requests in the
+second comparison carried the paired seed, temperature and assigned fragment.
+
+| Observation | Temporary control | Temporary guide | Profile control | Profile guide |
+| --- | ---: | ---: | ---: | ---: |
+| First patch in scope compiles and passes | 2/3 | 3/3 | 3/3 | 1/3 |
+| Native `finish_turn` | 2/3 | 3/3 | 2/3 | 1/3 |
+| Model requests | 18 | 14 | 17 | 17 |
+| Tool dispatches including closure | 21 | 16 | 20 | 22 |
+
+All nine passing first patches across the comparisons caught six
+mutations of the fake runtime: wrong stdout, wrong submission, zero exit
+code, an extra producer, a live job after retirement, and unexpected stderr.
+The scorer checks the insertion's Rust syntax tree to distinguish comments
+from forbidden PTY calls. The trials used one reduced fixture and three
+seeds. The system-fragment variant was discarded after two trials used the
+tool budget without editing. The temporary guide remains an experiment.
+
 ### What a task record means
 
 ```json
