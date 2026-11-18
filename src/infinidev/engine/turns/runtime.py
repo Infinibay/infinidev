@@ -139,10 +139,16 @@ def _compact(messages: list[dict[str, Any]]) -> None:
     references = {id(message): message.get('_archive_reference') for message in messages}
     action_contents = {id(message): message.get('content') for message in messages
                        if message.get('_action_metadata')}
+    latest = next((message for message in reversed(messages)
+                   if message.get('role') == 'assistant'), {})
+    manual_content = latest['content'] if latest.get('_manual_action') else None
     manual_results = [message for message in messages if message.get('_tool_result')]
     for message in manual_results:
         message['role'] = 'tool'
     ContextManager.compact_for_pressure(messages)
+    if manual_content is not None:
+        # The current observation needs the full action that produced it.
+        latest['content'] = manual_content
     for message in manual_results:
         message['role'] = 'user'
     for message in messages:
@@ -420,6 +426,7 @@ def _action_message(ctx: Any, result: LLMCallResult, calls: list[Any]) -> dict[s
                     pass
             actions.append({'name': call.function.name, 'arguments': arguments})
         message['content'] = json.dumps({'tool_calls': actions}, ensure_ascii=False)
+        message['_manual_action'] = True
     else:
         message['content'] = result.raw_content or None
         message['tool_calls'] = [dict(id=call.id, type='function', function=dict(

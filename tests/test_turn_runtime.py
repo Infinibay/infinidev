@@ -345,6 +345,37 @@ def test_manual_results_compact_under_pressure(runtime, monkeypatch):
     assert seen[-1][0][1]['content'] == 'literal'
 
 
+def test_pressure_preserves_latest_manual_action_and_its_results(runtime, monkeypatch):
+    from infinidev.engine.turns import runtime as rt
+
+    engine, agent, script, seen = runtime
+    monkeypatch.setattr(rt, 'get_model_capabilities', lambda: SimpleNamespace(
+        supports_function_calling=False, supports_vision=False))
+    old = 'previous evidence ' * 250
+    fresh = 'current evidence ' * 250
+
+    def manual_action(*values):
+        return {'tool_calls': [
+            {'name': 'record', 'arguments': {'text': value}} for value in values
+        ]}
+
+    script(reply(json.dumps(manual_action(old)), tokens=900_000),
+           reply(json.dumps(manual_action(fresh, 'another result')), tokens=900_000),
+           reply('', tc('finish_turn', message='Done.')))
+
+    assert engine.run_turn(agent, 'Work').status == 'answered'
+    request = seen[-1][0]
+    actions = [message for message in request if message['role'] == 'assistant']
+    assert json.loads(actions[-1]['content']) == manual_action(fresh, 'another result')
+    assert len(actions[0]['content']) < 1000
+    results = [message['content'] for message in request if
+               message.get('content', '').startswith('[Tool: record] Result:')]
+    assert len(results[0]) < len(old)
+    assert fresh in results[1]
+    assert 'another result' in results[2]
+    assert all(not key.startswith('_') for message in request for key in message)
+
+
 def test_answer_can_explain_tool_protocol_as_prose(runtime):
     engine, agent, script, seen = runtime
     script(reply('The "arguments" field contains the values you supply.'))

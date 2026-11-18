@@ -101,7 +101,7 @@ def test_native_history_remains_native_after_manual_fallback(runtime):
     assert len(manual) == 1 and META['expected_result'] in manual[0]['content']
 
 
-def test_manual_compaction_keeps_round_count_and_original_aging():
+def test_manual_compaction_preserves_latest_action_and_ages_prior_rounds():
     from infinidev.engine.turns.runtime import _action_message, _compact
     from infinidev.engine.loop.context_manager import ContextManager
     import copy
@@ -119,11 +119,13 @@ def test_manual_compaction_keeps_round_count_and_original_aging():
     control = copy.deepcopy(messages)
     for m in control:
         m.pop('_action_metadata', None)
+    latest = actions[-1]['content']
     for _ in range(4):
         ContextManager.compact_for_pressure(control)
         _compact(messages)
         assert [m['role'] for m in messages] == [m['role'] for m in control]
         assert [m.get('_thinking_age') for m in messages] == [
             m.get('_thinking_age') for m in control]
-        assert all(m['content'].count(PREFIX) == 1 for m in actions)
-        assert all(len(m['content']) < 1000 for m in actions)
+        assert all(m['content'].count(PREFIX) == 1 for m in actions[:-1])
+        assert all(len(m['content']) < 1000 for m in actions[:-1])
+        assert actions[-1]['content'] == latest

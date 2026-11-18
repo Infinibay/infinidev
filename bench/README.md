@@ -105,6 +105,21 @@ edit in `cart-immutability` and `options-override`. The latter closed with
 `finish_turn` in both arms. The run confirms the control took effect
 while leaving the measured delivery count at 1/2 in both arms.
 
+A budget feedback probe used the same three editing tasks, temperature
+0.2, seed 147, automatic native tool choice and caps of 14 model requests
+and 14 tool calls. The treatment added a host message to the current
+request when either count had three or fewer remaining. The message gave
+both counts, included `finish_turn` in the tool budget and asked for an
+evidence-based report. Both arms passed the independent verifier, ran the
+visible suite on the final revision, and closed with `finish_turn` in 3/3
+tasks. Only `cart-immutability` crossed the threshold in the treatment.
+Its three messages arrived twice before a successful check of the then
+current revision and once after it. The runs used 128,847 observed prompt
+tokens without the message and 141,597 with the treatment enabled. This
+total includes different tool trajectories. It cannot isolate the cost
+or effect of the three 212-byte messages. The probe stayed outside the
+runtime.
+
 The scope comparison authorizes the literal destination through the existing
 `allowed_paths` permission mode. The catalog and task stay fixed. The offline
 control attempts two edits to a protected file before successfully creating
