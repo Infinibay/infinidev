@@ -130,6 +130,34 @@ edit in `cart-immutability` and `options-override`. The latter closed with
 `finish_turn` in both arms. The run confirms the control took effect
 while leaving the measured delivery count at 1/2 in both arms.
 
+An effort comparison at Infinidev `295a07e` used Qwen3.8-FN-UD-IQ4_XS
+over Adamant, which reported `basalt 0.2.1` in `/props`. It ran
+`cart-immutability`, `test-selection` and `tool-failure-recovery` once per
+level. The OpenAI-compatible HTTP bodies supplied `none`, `low` or `high`
+in `chat_template_kwargs.reasoning_effort`. All arms used temperature
+0.2, seed 147, native automatic tool choice, 4,096 output tokens, a 1,536
+reasoning-token budget and caps of 14 model requests and 14 tool calls per
+task. The `none` control ran after the counterbalanced `low` and `high` pairs.
+Only `low` and `high` produced content in the separate reasoning channel.
+
+| Observation across three tasks | `none` | `low` | `high` |
+| --- | ---: | ---: | ---: |
+| In-scope patch passes the independent verifier | 3/3 | 3/3 | 3/3 |
+| Visible suite passes on the final revision | 3/3 | 3/3 | 3/3 |
+| Native `finish_turn` | 2/3 | 3/3 | 2/3 |
+| HTTP model requests | 29 | 16 | 27 |
+| Observed completion tokens | 5,124 | 5,828 | 14,246 |
+| Total elapsed turn seconds | 109.68 | 93.83 | 209.67 |
+
+On `cart-immutability`, `none` exhausted the model-call budget and `high`
+exhausted the tool-call budget after verification. Earlier pairs were
+discarded after the fixture observer raised when it tried to read a nonexistent
+file following a rejected edit. The corrected observer passed six scripted
+runs that included this rejection. All three independent verifiers rejected
+their pristine fixtures and accepted the reference patches. The corrected
+campaign had no host exceptions. The sample favors trying `low` on further
+tasks before choosing a production default.
+
 A budget feedback probe used the same three editing tasks, temperature
 0.2, seed 147, automatic native tool choice and caps of 14 model requests
 and 14 tool calls. The treatment added a host message to the current
