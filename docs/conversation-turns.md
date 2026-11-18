@@ -125,8 +125,9 @@ other tool effects reset the observation window. The check runs after each
 batch, so writes in a mixed batch can complete before the next request.
 After a cutoff, the next turn receives the specific stop reason and retained
 evidence. Identical local read evidence in the same turn can reuse its archive
-locator. A read of a changed file keeps a separate locator even when the
-returned lines match. Each dispatch retains its trace event.
+locator. A read of a different observed file revision counts as new evidence
+and keeps a separate locator even when the returned lines match. Each
+dispatch retains its trace event.
 
 Set `INFINIDEV_TASK_TEST_REVISION_FEEDBACK_ENABLED=true` to observe test
 revisions in the principal engine. A recognised test command with an

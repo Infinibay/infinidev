@@ -864,7 +864,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         reported_archive_revisions: dict[str, str] = {}
         prior_verification_status = verification.status if verification is not None else None
         read_repetition = ReadRepetitionGuard()
-        read_archives: dict[tuple[str, FileReadObservation | None], str] = {}
+        read_archives: dict[str, str] = {}
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
@@ -1203,6 +1203,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                     'cancel_event': engine._tool_cancel_event},
                                 attachments_out=attachments, file_tracker=tracker,
                                 file_change_hooks=engine._hooks, test_verification=verification)
+                        file_read = (file_reads[0]
+                                     if len(file_reads) == 1 and not engine.is_cancelled else None)
                         if readback_available:
                             readback_pending = _confirmed_write_target(
                                 call.function.name, body, workspace_path)
@@ -1224,7 +1226,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                             if read_batch is not None:
                                 read_signature = None if attachments else read_result_signature(
                                     call.function.name, args, getattr(tool, 'effects', None),
-                                    body, output_sha256,
+                                    body, output_sha256, file_read,
                                 )
                                 if read_signature is None:
                                     read_batch = None
@@ -1246,11 +1248,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         source = _recalled_file_source(state.evidence_sources, recalled_ref, body)
                         if source is not None:
                             recalled_files[recalled_ref] = source
-                    file_read = file_reads[0] if len(file_reads) == 1 and not engine.is_cancelled else None
                     read_key = None
                     if (recalled_ref is None and read_signature
                             and (call.function.name != 'read_file' or file_read is not None)):
-                        read_key = (read_signature, file_read)
+                        read_key = read_signature
                         reference = read_archives.get(read_key, '')
                     if recalled_ref is None and reference not in state.evidence_sources:
                         reference = _archive(ctx, iterations, call.function.name, args, body)

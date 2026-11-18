@@ -100,7 +100,7 @@ def test_resume_after_read_loop_reuses_distinct_evidence(
     assert "OTHER_VALUE = 2" in json.loads(tool_body)["content"]
 
 
-def test_same_slice_of_changed_file_gets_a_new_archive(
+def test_same_slice_of_changed_file_remains_new_evidence(
     runtime, workspace_dir, tool_context, auto_approve_permissions, sandbox_disabled,
 ):
     from infinidev.db.service import get_session_runtime_state
@@ -110,21 +110,26 @@ def test_same_slice_of_changed_file_gets_a_new_archive(
     path.write_text("PINNED = 1\nOUTSIDE_SLICE = 2\n")
     agent.tools = [ReadFileTool()]
     read = reply("", tc("read_file", file_path=path.name, limit=1))
+    revision = 2
 
     def read_changed_file():
-        path.write_text("PINNED = 1\nOUTSIDE_SLICE = 333\n")
+        nonlocal revision
+        revision += 1
+        path.write_text(f"PINNED = 1\nOUTSIDE_SLICE = {revision}\n")
         return read
 
-    script(read, read_changed_file, reply("", tc("finish_turn", message="Done.")))
-    assert engine.run_turn(agent, "Read the first line again after the change.").status == "answered"
+    script(*(read_changed_file for _ in range(6)), reply("", tc("finish_turn", message="Done.")))
+    result = engine.run_turn(agent, "Read the first line after each change.",
+                             max_total_tool_calls=0, max_iterations=0)
+    assert result.status == "answered"
+    assert not any(has_warning(request) for request in seen)
     outputs = [item["content"].split("\n[Archived evidence", 1)[0]
                for item in seen[-1][0] if item["role"] == "tool"]
-    assert outputs == ["     1\tPINNED = 1"] * 2
+    assert outputs == ["     1\tPINNED = 1"] * 6
     saved = get_session_runtime_state(tool_context.session_id)["ui_state"]["conversation"]
-    first, second = saved["evidence"]
-    assert first != second
-    assert (saved["evidence_sources"][first]["file_fingerprint"]
-            != saved["evidence_sources"][second]["file_fingerprint"])
+    assert len(set(saved["evidence"])) == 6
+    assert len({saved["evidence_sources"][reference]["file_fingerprint"]
+                for reference in saved["evidence"]}) == 6
 
 
 @pytest.mark.parametrize("progress", ["new_result", "guidance", "write_in_batch"])

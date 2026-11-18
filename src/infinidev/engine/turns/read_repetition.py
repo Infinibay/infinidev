@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from infinidev.engine.engine_logging import extract_tool_error
 from infinidev.tools.base.tool_effects import ToolEffects, local_effects_for_name
+
+if TYPE_CHECKING:
+    from infinidev.tools.file.read_observation import FileReadObservation
 
 _WORKSPACE_READ = ToolEffects(reads_workspace=True)
 _MAX_RECENT_READS = 256
@@ -17,15 +20,17 @@ _STOP_AFTER_REPEATED_BATCHES = 4
 
 def read_result_signature(
     name: str, arguments: dict[str, Any], effects: object, body: str, body_sha256: str,
+    file_read: FileReadObservation | None,
 ) -> str | None:
-    """Identify a successful local read by its call and observed output."""
+    """Identify a successful local read by its call, output and observed revision."""
     if not isinstance(effects, ToolEffects) or effects.is_empty:
         effects = local_effects_for_name(name)
     if effects != _WORKSPACE_READ or not body.strip() or extract_tool_error(body):
         return None
     # Distinct searches can legitimately return the same empty result.
+    revision = (file_read.path, file_read.fingerprint) if file_read is not None else None
     try:
-        identity = json.dumps([name, arguments, body_sha256], sort_keys=True).encode()
+        identity = json.dumps([name, arguments, body_sha256, revision], sort_keys=True).encode()
     except (TypeError, ValueError):
         return None
     return hashlib.sha256(identity).hexdigest()
