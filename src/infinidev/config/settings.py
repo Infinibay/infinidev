@@ -394,6 +394,8 @@ class Settings(BaseSettings):
     # unlimited total calls. Local Step boundaries still compact accumulated
     # context, while the loop's non-progress guards remain independent.
     TASK_MAX_TOOL_CALLS: int = 0
+    # Principal turns can request read_file once after the first successful write.
+    TASK_FIRST_WRITE_READBACK_ENABLED: bool = False
     # Steps are bounded by context pressure and progress evidence, not call count.
     # Zero keeps their tool surface open until completion, cancellation, or compaction.
     TASK_MAX_TOOL_CALLS_PER_STEP: int = 0

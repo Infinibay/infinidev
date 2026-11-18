@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from infinidev.config.llm import get_litellm_params
+from infinidev.config.llm import get_litellm_params, provider_for_request
 from infinidev.config.model_capabilities import get_model_capabilities
 from infinidev.config.settings import settings
 from infinidev.db.service import _persist_session_runtime_field, get_session_runtime_state
@@ -283,7 +283,10 @@ def _visible_message(message: Any) -> tuple[str, Any]:
     return remaining, SimpleNamespace(content=remaining, **fields)
 
 
-def _call(ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]]) -> LLMCallResult:
+def _call(
+    ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]],
+    *, tool_choice: str | dict[str, Any],
+) -> LLMCallResult:
     schemas = None if ctx.manual_tc else ctx.tool_schemas
     recorder = current_recorder()
     if recorder is not None:
@@ -296,8 +299,7 @@ def _call(ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]]) -> LLMCal
         'manual' if ctx.manual_tc else 'function_calling'))
     provider_messages = [{key: value for key, value in message.items()
                           if not key.startswith('_')} for message in messages]
-    choice = 'required' if ctx.state.total_tool_calls else 'auto'
-    response = call_llm(ctx.llm_params, provider_messages, schemas, tool_choice=choice,
+    response = call_llm(ctx.llm_params, provider_messages, schemas, tool_choice=tool_choice,
         use_json_mode=False,
         on_request_metadata=ctx.on_request_metadata,
         on_thinking_chunk=caller._on_thinking_chunk,
@@ -383,6 +385,21 @@ def _validated_arguments(ctx: Any, call: Any) -> dict[str, Any]:
                 for key in sorted(unknown)])
         args = schema.model_validate(args).model_dump()
     return args
+
+
+def _confirmed_file_write(name: str, body: str) -> bool:
+    expected = {'create_file': 'created', 'edit_file': 'modified'}.get(name)
+    if expected is None:
+        return False
+    try:
+        result = json.loads(body)
+    except ValueError:
+        return False
+    return (
+        isinstance(result, dict) and 'error' not in result
+        and result.get('action') == expected
+        and isinstance(result.get('file_path'), str) and bool(result['file_path'])
+    )
 
 
 def _action_message(ctx: Any, result: LLMCallResult, calls: list[Any]) -> dict[str, Any]:
@@ -540,6 +557,14 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             state=legacy_state, tools=tools, tool_schemas=schemas,
             tool_dispatch=build_tool_dispatch(tools), system_prompt=system,
             tool_call_metadata=tool_call_metadata)
+        readback_available = (
+            settings.TASK_FIRST_WRITE_READBACK_ENABLED
+            and not manual
+            and not getattr(capabilities, 'restricts_tool_choice_to_auto', False)
+            and provider_for_request(params, settings.LLM_PROVIDER) == 'openai_compatible'
+            and 'read_file' in ctx.tool_dispatch
+        )
+        readback_pending = False
         recorder = current_recorder()
         ctx.recording_run_id = receipt['run_id']
         ctx.recording_iteration = 0
@@ -588,17 +613,28 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
-            _drain_guidance(engine, messages, vision, _parent_guidance)
+            if _drain_guidance(engine, messages, vision, _parent_guidance):
+                readback_pending = False
             if max_iterations and iterations >= max_iterations:
                 return outcome('exhausted', 'Conversation interrupted: model call limit reached.')
             if max_calls and legacy_state.total_tool_calls >= max_calls:
                 return outcome('exhausted', 'Conversation interrupted: tool call limit reached.')
             if ContextManager.under_context_pressure(legacy_state.last_prompt_tokens, window):
                 _compact(messages)
+                readback_pending = False
             iterations += 1
             ctx.recording_iteration = iterations
+            tool_choice: str | dict[str, Any] = 'required' if legacy_state.total_tool_calls else 'auto'
+            if readback_pending:
+                if (
+                    not ctx.manual_tc
+                    and (not max_iterations or iterations < max_iterations)
+                    and (not max_calls or legacy_state.total_tool_calls + 1 < max_calls)
+                ):
+                    tool_choice = {'type': 'function', 'function': {'name': 'read_file'}}
+                readback_pending = False
             trace('runtime_request', mode='manual' if ctx.manual_tc else 'function_calling',
-                  requested_tool_choice='required' if legacy_state.total_tool_calls else 'auto',
+                  requested_tool_choice=tool_choice,
                   finish_turn_offered=any(s['function']['name'] == 'finish_turn'
                                          for s in ctx.tool_schemas),
                   message_roles=[m['role'] for m in messages], reminder=unclosed_responses)
@@ -606,7 +642,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             usage_before = (legacy_state.total_prompt_tokens, legacy_state.total_completion_tokens)
             call_started = time.monotonic()
             try:
-                result = _call(ctx, caller, messages)
+                result = _call(ctx, caller, messages, tool_choice=tool_choice)
             except Exception as exc:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
@@ -791,6 +827,11 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                 'agent_id': agent.agent_id,
                                 'cancel_event': engine._tool_cancel_event},
                             attachments_out=attachments)
+                        if readback_available and _confirmed_file_write(call.function.name, body):
+                            readback_available = False
+                            readback_pending = True
+                        elif call.function.name == 'read_file':
+                            readback_pending = False
                         if observer is not None:
                             observer.record('working', 'tool_completed', tool_name=call.function.name,
                                             progress=True)

@@ -382,17 +382,19 @@ def call_llm(
     if attempts < 1:
         raise ValueError("retry_attempts must be positive")
     last_exc: Exception | None = None
-    for attempt in range(1, attempts + 1):
+    attempt = 0
+    while attempt < attempts:
+        attempt += 1
+        if on_request_metadata is not None:
+            on_request_metadata({
+                'scope': 'litellm_input', 'attempt': attempt,
+                'tool_choice': kwargs.get('tool_choice'),
+                'tools': [t.get('function', {}).get('name')
+                          for t in kwargs.get('tools') or []],
+                'message_roles': [m.get('role') for m in kwargs.get('messages') or []],
+                'streaming': use_streaming,
+            })
         try:
-            if on_request_metadata is not None:
-                on_request_metadata({
-                    'scope': 'litellm_input', 'attempt': attempt,
-                    'tool_choice': kwargs.get('tool_choice'),
-                    'tools': [t.get('function', {}).get('name')
-                              for t in kwargs.get('tools') or []],
-                    'message_roles': [m.get('role') for m in kwargs.get('messages') or []],
-                    'streaming': use_streaming,
-                })
             if use_streaming:
                 response = _stream_and_assemble(
                     litellm, kwargs,
@@ -401,13 +403,6 @@ def call_llm(
                 )
             else:
                 response = litellm.completion(**kwargs)
-
-            # --- Post-LLM hook ---
-            llm_ctx.event = HookEvent.POST_LLM_CALL
-            llm_ctx.metadata["response"] = response
-            hook_manager.dispatch(llm_ctx)
-
-            return llm_ctx.metadata["response"]
         except Exception as exc:
             last_exc = exc
             # Auto-drop tool_choice if the endpoint doesn't support it at all.
@@ -416,13 +411,22 @@ def call_llm(
             # error, so match that signature too when tool_choice=required was
             # in the outgoing request.
             err_msg = str(exc).lower()
+            requested_choice = kwargs.get("tool_choice")
             tc_issue = (
                 "tool_choice" in err_msg
                 or "tool_choise" in err_msg
-                or (kwargs.get("tool_choice") == "required" and "failed to parse input" in err_msg)
+                or (requested_choice == "required" and "failed to parse input" in err_msg)
             )
             if tc_issue:
-                if "tool_choice" in kwargs:
+                if (
+                    isinstance(requested_choice, dict)
+                    and getattr(exc, "status_code", None) in {400, 422}
+                ):
+                    # A rejected function name selector says nothing about required.
+                    kwargs["tool_choice"] = "required" if caps.supports_tool_choice_required else "auto"
+                    attempts += 1
+                    continue
+                if requested_choice is not None and not isinstance(requested_choice, dict):
                     logger.info("Dropping tool_choice — endpoint does not support it (err: %s)", str(exc)[:120])
                     del kwargs["tool_choice"]
                     # Only memoize the negative if the failure is not
@@ -440,4 +444,9 @@ def call_llm(
                 attempt, attempts, delay, str(exc)[:200],
             )
             time.sleep(delay)
+        else:
+            llm_ctx.event = HookEvent.POST_LLM_CALL
+            llm_ctx.metadata["response"] = response
+            hook_manager.dispatch(llm_ctx)
+            return llm_ctx.metadata["response"]
     raise last_exc  # type: ignore[misc]

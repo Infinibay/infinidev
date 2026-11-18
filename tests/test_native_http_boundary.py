@@ -26,7 +26,16 @@ def local_completion_endpoint(monkeypatch, tmp_path):
             index = len(requests)
             requests.append((self.path, payload, raw))
             (tmp_path / f'request-{index}.json').write_bytes(raw)
-            function = {'name': reply_name[0], 'arguments': '{}'}
+            if isinstance(payload.get('tool_choice'), dict) and reply_name[0] == 'reject_named':
+                failure = b'{"error":{"message":"Named tool_choice is not supported"}}'
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(failure)))
+                self.end_headers()
+                self.wfile.write(failure)
+                return
+            function = {'name': 'finish_turn' if reply_name[0] == 'reject_named' else reply_name[0],
+                        'arguments': '{}'}
             call = {'id': 'synthetic-call', 'type': 'function', 'function': function}
             common = {'id': 'synthetic-completion', 'created': 1,
                       'model': 'Qwen3.8-FN-UD-IQ4_XS'}
@@ -115,6 +124,8 @@ def synthetic_request(monkeypatch, endpoint, required_supported):
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('requested,supported,expected', [
     ('auto', False, 'auto'), ('required', False, 'auto'), ('required', True, 'required'),
+    ({'type': 'function', 'function': {'name': 'read_file'}}, True,
+     {'type': 'function', 'function': {'name': 'read_file'}}),
 ])
 def test_exact_catalog_roles_and_choice_survive_real_http(
         monkeypatch, local_completion_endpoint, stream, requested, supported, expected):
@@ -160,6 +171,46 @@ def test_exact_catalog_roles_and_choice_survive_real_http(
                'template_enable_thinking': payload['chat_template_kwargs']['enable_thinking'],
                'returned_name': response.choices[0].message.tool_calls[0].function.name}
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+
+
+@pytest.mark.parametrize('stream', [False, True])
+def test_rejected_named_choice_returns_to_supported_native_choice(
+        monkeypatch, local_completion_endpoint, stream):
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.config.model_capabilities import get_model_capabilities
+    from infinidev.engine.llm_client import call_llm
+
+    endpoint, requests, reply_name, _ = local_completion_endpoint
+    messages, schemas = synthetic_request(monkeypatch, endpoint, True)
+    reply_name[0] = 'reject_named'
+    named = {'type': 'function', 'function': {'name': 'read_file'}}
+    response = call_llm(get_litellm_params(), messages, schemas, tool_choice=named,
+                        retry_attempts=1, on_thinking_chunk=(lambda _: None) if stream else None)
+    assert [payload['tool_choice'] for _, payload, _ in requests] == [named, 'required']
+    assert all(payload['tools'] == schemas for _, payload, _ in requests)
+    assert get_model_capabilities().supports_tool_choice_required
+    assert response.choices[0].message.tool_calls[0].function.name == 'finish_turn'
+
+
+def test_post_llm_hook_failure_does_not_repeat_a_received_response(
+        monkeypatch, local_completion_endpoint):
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.engine.hooks.hooks import HookEvent, hook_manager
+    from infinidev.engine.llm_client import call_llm
+
+    endpoint, requests, reply_name, _ = local_completion_endpoint
+    messages, schemas = synthetic_request(monkeypatch, endpoint, True)
+    reply_name[0] = 'read_file'
+
+    def fail_after_response(ctx):
+        if ctx.event is HookEvent.POST_LLM_CALL:
+            raise RuntimeError('Hook failed while inspecting tool_choice')
+
+    monkeypatch.setattr(hook_manager, 'dispatch', fail_after_response)
+    named = {'type': 'function', 'function': {'name': 'read_file'}}
+    with pytest.raises(RuntimeError, match='Hook failed'):
+        call_llm(get_litellm_params(), messages, schemas, tool_choice=named, retry_attempts=1)
+    assert [payload['tool_choice'] for _, payload, _ in requests] == [named]
 
 
 @pytest.mark.parametrize('returned_name', ['read_file', 'Read', 'write_file', 'devkit:read_file'])

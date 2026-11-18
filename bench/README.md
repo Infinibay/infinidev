@@ -67,6 +67,11 @@ fixed. Two requests at 0 returned identical text hashes, and the request at
 1 returned a different hash. The server rejected invalid values of
 `temperature`, `top_p`, `top_k`, `min_p` and `seed` with field-specific
 HTTP 400 errors. Parameter support and programming quality are separate checks.
+At fixed temperature and seed, valid pairs of `top_p`, `top_k` and `min_p`
+also returned different text hashes on one synthetic prompt per parameter.
+These were endpoint checks. The programming comparison varied temperature only.
+Separately, Strata's own OpenAI-compatible HTTP tests cover overriding server
+sampling defaults per request using a mock engine.
 
 The scope comparison authorizes the literal destination through the existing
 `allowed_paths` permission mode. The catalog and task stay fixed. The offline
@@ -80,6 +85,28 @@ write. In two live pairs, one in reversed order, neither arm created the file
 and neither changed a protected file. The instrumented pair observed no
 permission denial, so the live result measures neither benefit nor harm from
 containment. The scripted control independently proves both denials.
+
+### Readback after an observed write
+
+`INFINIDEV_TASK_FIRST_WRITE_READBACK_ENABLED=true` enables an experiment for
+native OpenAI-compatible tools. After the first successful `create_file` or
+`edit_file` in a turn runtime invocation, the next request can select
+`read_file` by name. The model supplies the arguments and existing permissions
+apply. A subsequent `read_file` attempt in the same batch skips the request,
+regardless of its path or result. New user guidance, cancellation, context
+compaction and limits that leave only one request or tool call also take
+precedence. If the endpoint rejects the selector with a parameter error, one
+extra HTTP request can restore ordinary native tool selection without spending
+another runtime iteration.
+
+In five exploratory pairs on Qwen with a prototype, joint success (correct
+artifact, full readback where required and explicit closure) went from 1/5 to
+2/5. The named request ran in two treated tasks. With the actual flag, both
+literal creation tasks met all three criteria with it enabled, compared with
+0/2 when disabled. A separate pair editing a caller contract passed in both
+arms. These small samples support keeping the switch available for evaluation
+with the default off. A named request does not certify that the model read the
+right path or checked the whole artifact.
 
 ### What a task record means
 
