@@ -293,6 +293,15 @@ check. The baseline selected the correct older reference on its first
 recall, and the treatment reached it later. The order field stayed in
 the probe.
 
+Two further pairs asked for the current setting after the only archived read
+of its file had been superseded by an external edit. Both arms offered the
+same archive locators, live file reads, and native tool catalog at temperature
+0.2 and seed 281. The treatment added `file_revision_status: changed` to the
+target locator. With the label, both trials read the live file and returned
+its exact current value. The controls recalled the archive and returned the
+previous value in both trials. All four closed via `finish_turn`. This was
+one pair per fixture on Basalt with Qwen3.8-FN-UD-IQ4_XS.
+
 ### What a task record means
 
 ```json
