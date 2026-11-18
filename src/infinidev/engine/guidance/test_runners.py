@@ -286,40 +286,39 @@ def test_outcome_fingerprint(content: str) -> str | None:
     return ", ".join(parts)
 
 
-def reconcile_test_result_payload(payload: dict) -> dict:
-    """Override a shell zero when the test output proves the run failed."""
-    if payload.get("exit_code") != 0:
+def annotate_test_result_payload(payload: dict) -> dict:
+    """Expose conflicting test output without changing the observed exit."""
+    if payload.get("exit_code") != 0 or payload.get("test_output_conflict") is True:
         return payload
     output = "\n".join(
         str(payload.get(key) or "") for key in ("stdout", "stderr")
     )
-    explicit_codes = [int(value) for value in _EXPLICIT_EXIT_RE.findall(output)]
-    effective_exit = explicit_codes[-1] if explicit_codes else 0
-    if effective_exit == 0:
+    explicit_codes = _EXPLICIT_EXIT_RE.findall(output)
+    printed_code = explicit_codes[-1] if explicit_codes else ""
+    reported_exit = int(printed_code) if 0 < len(printed_code) <= 10 else 0
+    if reported_exit == 0:
         fingerprint = test_outcome_fingerprint(output) or ""
         failed_count = re.search(
             r"(?:^|,\s*)([1-9]\d*)\s+(?:failed|error)\b",
             fingerprint,
         )
-        if failed_count or _MASKED_TEST_FAILURE_RE.search(output):
-            effective_exit = 1
-    if effective_exit == 0:
-        return payload
+        if not failed_count and not _MASKED_TEST_FAILURE_RE.search(output):
+            return payload
 
-    reconciled = dict(payload)
-    reconciled["shell_exit_code"] = 0
-    reconciled["exit_code"] = effective_exit
-    reconciled["success"] = False
-    reconciled["status_note"] = (
-        "Test output proves failure; the shell's final zero was produced by "
-        "a wrapper such as tail, echo, or || true."
+    annotated = dict(payload)
+    annotated["test_output_conflict"] = True
+    if reported_exit:
+        annotated["reported_test_exit_code"] = reported_exit
+    annotated["status_note"] = (
+        "The command exited 0, but its output contains a possible test failure. "
+        "Confirm the test runner's result before reporting that tests passed."
     )
-    return reconciled
+    return annotated
 
 
 __all__ = [
+    "annotate_test_result_payload",
     "is_test_command",
     "normalize_test_command",
-    "reconcile_test_result_payload",
     "test_outcome_fingerprint",
 ]

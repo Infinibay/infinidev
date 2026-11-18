@@ -20,6 +20,13 @@ status is available as `shell_exit_code`. Interrupted interactive runs
 return their available inline output without publishing complete capture
 handles.
 
+For a recognised test command, a zero exit can coexist with a failure
+indication in its output. In that case `test_output_conflict` marks the
+verification as unconfirmed, and `reported_test_exit_code` can carry a
+code printed in the log. The observed `exit_code` and `success` still
+describe the command execution. A conflicting result leaves verification
+unconfirmed and allows a fresh run.
+
 ## Configuration
 
 Settings may be placed in the project-local `.infinidev/settings.json` or set

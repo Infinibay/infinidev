@@ -186,6 +186,15 @@ def test_execute_command_labels_only_the_truncated_stream(widget):
     assert "Last error" in out
 
 
+def test_execute_command_distinguishes_a_shell_zero_from_conflicting_test_output(widget):
+    result = json.dumps({
+        "exit_code": 0, "stdout": "EXIT=7", "stderr": "", "test_output_conflict": True,
+    })
+    output = _flat(widget.render({"tool_name": "execute_command", "result": result}, 80))
+    assert "exit 0" in output
+    assert "Test result needs confirmation" in output
+
+
 def test_execute_command_failure_shows_exit_code_and_stderr(widget):
     result = json.dumps({"exit_code": 1, "stdout": "", "stderr": "Permission denied"})
     msg = {

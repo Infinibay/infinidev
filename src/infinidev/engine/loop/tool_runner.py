@@ -75,25 +75,6 @@ _DISCOVERY_SUPPRESSED_STATUS = "discovery_suppressed"
 _REPEATED_TEST_STATUS = "test_already_run"
 _MAX_READ_DELIVERY_KEYS = 256
 
-def _reconcile_masked_test_exit(result: str) -> str:
-    """Make a proven test failure outrank a shell wrapper's final zero."""
-    try:
-        payload = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
-        return result
-    if not isinstance(payload, dict):
-        return result
-
-    from infinidev.engine.guidance.test_runners import (
-        reconcile_test_result_payload,
-    )
-
-    reconciled = reconcile_test_result_payload(payload)
-    if reconciled is payload:
-        return result
-    return json.dumps(reconciled)
-
-
 def _repair_missing_edit_target(
     ctx: ExecutionContext, name: str, arguments: str,
 ) -> str:
@@ -1625,6 +1606,7 @@ class ToolRunner:
                 isinstance(payload, dict)
                 and payload.get("exit_code") == 0
                 and payload.get("success", True) is not False
+                and payload.get("test_output_conflict") is not True
             ):
                 tracker.on_successful_test(command)
 
@@ -1652,13 +1634,11 @@ class ToolRunner:
                 normalize_test_command,
                 test_outcome_fingerprint,
             )
+            from infinidev.engine.guidance.test_runners import annotate_test_result_payload
 
             if not is_test_command(arguments, ctx.state):
                 return result
 
-            result = _reconcile_masked_test_exit(result)
-
-            ctx.state.last_test_output = result
             try:
                 parsed = json.loads(arguments) if arguments else {}
                 command = str(parsed.get("command", ""))
@@ -1668,15 +1648,26 @@ class ToolRunner:
             try:
                 payload = json.loads(result)
             except (json.JSONDecodeError, TypeError):
+                payload = None
+            if not isinstance(payload, dict):
                 payload = {}
-            exit_code = payload.get("exit_code") if isinstance(payload, dict) else None
-            if isinstance(exit_code, int) and not isinstance(exit_code, bool):
-                ctx.state.last_test_exit_code = exit_code
-                if exit_code == 0 and command.strip():
-                    ctx.state.last_passing_test_command = command[:300]
+            annotated = annotate_test_result_payload(payload)
+            if annotated is not payload:
+                result = json.dumps(annotated)
+            ctx.state.last_test_output = result
+
+            conflict = annotated.get("test_output_conflict") is True
+            exit_code = annotated.get("exit_code")
+            ctx.state.last_test_exit_code = (
+                exit_code if type(exit_code) is int and not conflict else None
+            )
+            if ctx.state.last_test_exit_code == 0 and command.strip():
+                ctx.state.last_passing_test_command = command[:300]
 
             key = normalize_test_command(command)
-            if fingerprint := test_outcome_fingerprint(result):
+            if conflict:
+                ctx.state.test_workspace_fingerprints.pop(key, None)
+            elif fingerprint := test_outcome_fingerprint(result):
                 history = ctx.state.test_outcome_history.get(key, [])
                 if not history or history[-1] != fingerprint:
                     history.append(fingerprint)

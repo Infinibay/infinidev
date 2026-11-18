@@ -164,6 +164,25 @@ task still missed its final check and closure in both arms. These runs
 support preserving concrete check diagnostics where available. They leave
 the improvement in artifact correctness unproven.
 
+### Executable test feedback
+
+Three Qwen pairs used the repository's `test-selection`,
+`tool-failure-recovery`, and `options-override` fixtures. Commands ran with
+a read-only workspace and no network. Both arms saw the same command
+catalog, stdout, stderr, and process status. The structured arm also saw
+test names and counts from the pytest report. The final verification ran
+independently with the withheld gate restored where applicable.
+
+All three final artifacts passed in each arm. The raw arm completed 3/3
+deliveries with an observed post-edit suite run and explicit closure. The
+structured arm completed 2/3. In `options-override`, the raw arm explicitly
+reported that the visible tests covered defaults and that its override
+check was by inspection. The structured arm passed the visible
+suite on an earlier revision, then reached the tool limit after another
+edit. The independent gate passed the final source. The agent did not rerun
+the suite on that revision or close the turn. These exploratory runs leave
+a benefit from the extra structure unproven.
+
 ### What a task record means
 
 ```json

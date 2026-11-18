@@ -1153,8 +1153,15 @@ def test_failed_diagnostic_does_not_replace_last_passing_test_command():
     assert ctx.state.last_passing_test_command == "pytest tests/test_focused.py"
 
 
-def test_masked_cargo_failure_overrides_shell_zero_for_feedback_and_state():
+def test_conflicting_test_output_leaves_verification_unknown_and_retriable():
+    from infinidev.engine.guidance import normalize_test_command
+
     ctx = _ctx()
+    command = "cargo test -p infinigpu-device --lib | tail -15; echo EXIT=$?"
+    key = normalize_test_command(command)
+    ctx.state.last_test_exit_code = 0
+    ctx.state.last_passing_test_command = "pytest some_previous_test.py"
+    ctx.state.test_workspace_fingerprints[key] = "earlier observation"
     raw = json.dumps({
         "exit_code": 0,
         "success": True,
@@ -1167,18 +1174,17 @@ def test_masked_cargo_failure_overrides_shell_zero_for_feedback_and_state():
 
     result = ToolRunner.capture_test_output(
         ctx,
-        json.dumps({
-            "command": (
-                "cargo test -p infinigpu-device --lib | tail -15; "
-                "echo EXIT=$?"
-            ),
-        }),
+        json.dumps({"command": command}),
         raw,
     )
     payload = json.loads(result)
 
-    assert payload["shell_exit_code"] == 0
-    assert payload["exit_code"] == 101
-    assert payload["success"] is False
-    assert "shell's final zero" in payload["status_note"]
-    assert ctx.state.last_test_exit_code == 101
+    assert payload["exit_code"] == 0
+    assert payload["success"] is True
+    assert payload["test_output_conflict"] is True
+    assert payload["reported_test_exit_code"] == 101
+    assert ctx.state.last_test_exit_code is None
+    assert ctx.state.last_passing_test_command == "pytest some_previous_test.py"
+    assert key not in ctx.state.test_workspace_fingerprints
+    tracker = SimpleNamespace(on_successful_test=lambda _: pytest.fail("Unconfirmed test"))
+    ToolRunner._record_successful_step_test(ctx, json.dumps({"command": command}), result, tracker)

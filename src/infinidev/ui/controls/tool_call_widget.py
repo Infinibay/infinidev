@@ -485,6 +485,8 @@ def _fmt_shell_like(args, result, error, width, *, code_key: str | None = None) 
             s.append(_status(f"✗ killed: {_truncate(str(killed), 80)}", ok=False))
         elif exit_code is not None:
             s.append(_status(f"✗ exit {exit_code}", ok=False))
+        if env.get("test_output_conflict") is True:
+            s.append(_label("Test result needs confirmation"))
         for stream, output, color in (
             ("stdout", stdout, _TC_OUT_FG), ("stderr", stderr, _TC_ERR_FG),
         ):

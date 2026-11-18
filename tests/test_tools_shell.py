@@ -1,6 +1,7 @@
 """Tests for ExecuteCommandTool."""
 
 import json
+import shlex
 import signal
 import sys
 from unittest.mock import MagicMock, patch
@@ -93,7 +94,7 @@ class TestExecuteCommand:
         assert data["exit_code"] == 0
         assert data["stdout"] == "hello\n"
 
-    def test_test_output_failure_overrides_a_wrapper_final_zero(
+    def test_masked_test_output_is_reported_without_replacing_the_wrapper_exit(
         self, bound_tool, auto_approve_permissions
     ):
         tool = bound_tool(ExecuteCommandTool)
@@ -106,10 +107,10 @@ class TestExecuteCommand:
             tool._run(command=f"cargo test --help >/dev/null; {command}")
         )
 
-        assert data["shell_exit_code"] == 0
-        assert data["exit_code"] == 101
-        assert data["success"] is False
-        assert "shell's final zero" in data["status_note"]
+        assert data["exit_code"] == 0
+        assert data["success"] is True
+        assert data["test_output_conflict"] is True
+        assert data["reported_test_exit_code"] == 101
 
     def test_successful_test_output_keeps_shell_zero(
         self, bound_tool, auto_approve_permissions
@@ -127,6 +128,27 @@ class TestExecuteCommand:
         assert data["exit_code"] == 0
         assert data["success"] is True
         assert "shell_exit_code" not in data
+
+    @pytest.mark.parametrize("printed_code", ["17", "9" * 4400], ids=["short", "oversized"])
+    def test_test_stdout_cannot_override_the_observed_process_exit(
+        self, bound_tool, auto_approve_permissions, workspace_dir, printed_code,
+    ):
+        test_path = workspace_dir / "test_logging.py"
+        test_path.write_text(f"def test_example():\n    print('EXIT_CODE={printed_code}')\n")
+        command = shlex.join([
+            sys.executable, "-m", "pytest", "-q", "-s", "-p", "no:cacheprovider", str(test_path),
+        ])
+
+        result = json.loads(bound_tool(ExecuteCommandTool)._run(command=command))
+
+        assert "1 passed" in result["stdout"]
+        assert result["exit_code"] == 0
+        assert result["success"] is True
+        if printed_code == "17":
+            assert result["test_output_conflict"] is True
+            assert result["reported_test_exit_code"] == 17
+        else:
+            assert "reported_test_exit_code" not in result
 
     def test_execute_timeout(self, bound_tool, auto_approve_permissions):
         """Command that exceeds timeout returns error."""
