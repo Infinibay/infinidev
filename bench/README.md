@@ -253,6 +253,14 @@ The prompts and observed tool protocols differed between trials. The local
 HTTP streaming regression separately verifies a truncated native call,
 unchanged `max_tokens`, and a successful retry without the partial arguments.
 
+A follow-up pair used the same 96-token cap and scripted two cutoffs, a
+local edit, and a read of the resulting value between them. The one-retry
+control ended `exhausted` after the verified edit. With progress recovery,
+the live model closed via native `finish_turn` after three requests. Two
+fully live trials of the larger-edit prompt both hit their second cutoff
+before any edit, so neither qualified for another retry. The scripted pair
+isolates closure after an observed change.
+
 ### Verification counterexamples
 
 Three Qwen pairs offered the same fixture checker with the same prompts and
