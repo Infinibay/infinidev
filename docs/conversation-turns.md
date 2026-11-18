@@ -165,6 +165,12 @@ legacy execute format parsers remain separate. Tool arguments are opaque to pros
 and thinking-tag transformations. Conversational calls do not force JSON response
 format, so plain replies remain valid on JSON-capable manual backends.
 
+An invalid call causes the entire batch to be rejected before execution. Each
+result identifies the correction for that call. Calls that pass validation
+can be resubmitted unchanged when still needed. The current tool catalog is
+included with an unrecognized name. A `finish_turn` mixed with other calls
+must be sent separately after the pending work.
+
 Provenance records use kind runtime_trace and do not consume the forty evidence
 references retained between turns or enter semantic embedding/retrieval. They remain
 durable and available through explicit trace inspection. Historical rows retain

@@ -1064,6 +1064,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             if errors:
                 invalid_batches += 1
                 legacy_state.total_tool_calls += len(calls)
+                name_details = {call_id: _tool_name_details(exc.name, exc.offered_names)
+                                for call_id, exc in unoffered.items()}
                 # Persist only structural diagnostics, never arguments or model prose.
                 rejected = [{'tool': call.function.name[:100], 'errors': [
                     {'field': str(problem.get('loc', ('<arguments>',))[0])[:100]
@@ -1072,9 +1074,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     for problem in errors.get(call.id, [])]}
                     for call in calls]
                 for call, item in zip(calls, rejected):
-                    if call.id in unoffered:
-                        failure = unoffered[call.id]
-                        item.update(_tool_name_details(failure.name, failure.offered_names))
+                    item.update(name_details.get(call.id, {}))
                 report = json.dumps({'event': 'tool_validation_rejected',
                     'batch': iterations, 'executed': False, 'calls': rejected}, ensure_ascii=False)
                 recorder = current_recorder()
@@ -1092,23 +1092,22 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 validation_diagnostics[:] = validation_diagnostics[-3:]
                 messages.append(_action_message(ctx, result, calls))
                 for call in calls:
-                    recovery = 'Correct the invalid arguments using the tool schema and '
-                    recovery += 'resubmit the pending calls. No call in this batch executed.'
-                    details = {}
-                    if unoffered:
-                        offered = next(iter(unoffered.values())).offered_names
-                        details = _tool_name_details(call.function.name, offered)
-                        recovery = ('Use an exact offered tool name and its schema. '
-                                    'If offered_names_complete is false, consult the request '
-                                    'tool schemas for the full catalog. Correct any argument '
-                                    'errors and resubmit the pending calls. '
-                                    'No call in this batch executed.')
+                    call_errors = errors.get(call.id, [])
+                    details = name_details.get(call.id, {})
+                    if details:
+                        recovery = ('Choose an exact offered tool name and use its schema. '
+                                    'If offered_names_complete is false, consult the request schemas.')
+                    elif not call_errors:
+                        recovery = ('This call passed validation. Resubmit it unchanged '
+                                    'if it is still needed.')
+                    elif mixed_close and call.function.name == 'finish_turn':
+                        recovery = 'Resubmit any pending work without this call.'
+                    else:
+                        recovery = 'Correct the arguments for this call using its schema.'
                     if mixed_close:
-                        recovery = ('No call in this batch executed. Correct any argument or tool '
-                                    'name errors and retry the pending work without finish_turn. '
-                                    'After completing the work, call finish_turn by itself.')
+                        recovery += ' After completing the work, call finish_turn by itself.'
                     body = json.dumps({'error': 'Tool batch rejected before execution.',
-                        'executed': False, 'errors': errors.get(call.id, []),
+                        'executed': False, 'errors': call_errors,
                         **details, 'recovery': recovery}, ensure_ascii=False)
                     messages.append({'role': 'user', 'content':
                         f'[Tool: {call.function.name}] Result:\n{body}', '_tool_result': True}

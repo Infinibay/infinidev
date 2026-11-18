@@ -63,21 +63,42 @@ def test_argument_failure_keeps_actual_pydantic_type(runtime):
     assert 'tool_not_offered' not in json.dumps(body)
 
 
-def test_mixed_batch_runs_nothing_and_lists_same_grant_for_both(runtime, monkeypatch):
+@pytest.mark.parametrize('manual', [False, True])
+def test_mixed_batch_feedback_preserves_valid_siblings(runtime, monkeypatch, manual):
+    from infinidev.engine.turns import runtime as rt
     from tests.test_turn_runtime import RecordTool
-    engine,agent,script,seen=runtime
-    executed=Mock(side_effect=AssertionError('Batch must remain atomic'))
-    monkeypatch.setattr(RecordTool,'_run',executed)
-    script(action(False,[('record',{'text':'valid'}),('devkit:record',{'text':'PRIVATE_INPUT'})]),
-           action(False,[('finish_turn',{'message':'Rejected.'})]))
-    engine.run_turn(agent,'Synthetic request')
-    bodies=observations(seen[1],False)
-    assert len(bodies)==2 and all(b['executed'] is False for b in bodies)
-    assert all(b['offered_names']==['record','finish_turn','update_plan'] for b in bodies)
-    assert bodies[0]['requested_name']=='record'
-    assert bodies[0]['errors']==[]
-    assert bodies[1]['errors'][0]['type']=='tool_not_offered'
-    executed.assert_not_called()
+
+    engine, agent, script, seen = runtime
+    executed = Mock(return_value='Recorded')
+    monkeypatch.setattr(RecordTool, '_run', executed)
+    if manual:
+        monkeypatch.setattr(rt, 'get_model_capabilities', lambda: SimpleNamespace(
+            supports_function_calling=False, supports_vision=False))
+
+    valid = ('record', {'text': 'valid'})
+    invalid_name = ('devkit:record', {'text': 'PRIVATE_INPUT'})
+    invalid_arguments = ('record', {'text': 24})
+
+    def retry():
+        executed.assert_not_called()
+        bodies = observations(seen[-1], manual)
+        assert len(bodies) == 3 and all(body['executed'] is False for body in bodies)
+        assert bodies[0]['errors'] == []
+        assert 'unchanged' in bodies[0]['recovery']
+        assert 'offered_names' not in bodies[0]
+        assert 'requested_name' not in bodies[0]
+        assert bodies[1]['errors'][0]['type'] == 'tool_not_offered'
+        assert bodies[1]['requested_name'] == 'devkit:record'
+        assert bodies[1]['offered_names'] == ['record', 'finish_turn', 'update_plan']
+        assert bodies[2]['errors'][0]['type'] == 'string_type'
+        assert 'offered_names' not in bodies[2]
+        assert 'arguments' in bodies[2]['recovery']
+        return action(manual, [valid, ('record', {'text': 'fixed arguments'})])
+
+    script(action(manual, [valid, invalid_name, invalid_arguments]), retry,
+           action(manual, [('finish_turn', {'message': 'Recorded.'})]))
+    assert engine.run_turn(agent, 'Record both valid observations.').status == 'answered'
+    assert [entry.kwargs['text'] for entry in executed.call_args_list] == ['valid', 'fixed arguments']
 
 
 def test_empty_grant_reports_only_runtime_names(runtime):

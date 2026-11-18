@@ -304,6 +304,14 @@ file, and closed separately in four live requests per fixture. Both final
 workspaces matched the expected files. These probes exercise recovery from a
 given invalid response. Their initial response was scripted.
 
+Two further probes started with a valid edit paired with an unrecognized tool
+name or an invalid argument. The correction request retained the valid edit
+and sent the exact offered names with the name error. Qwen3.8 over Adamant
+recovered both two-file fixtures, reread both final files, and closed with
+`finish_turn` in five and six live requests. The valid edit’s diagnostic was
+172 bytes. The earlier name-error feedback on such a sibling was 524 bytes
+with the same catalog. These sizes cover a single result body.
+
 ### Recovering from an output cutoff
 
 Two live Qwen3.8 trials on Basalt used a fixed 96-token output cap and a
