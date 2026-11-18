@@ -20,6 +20,44 @@ Older corpora stay on disk because a frozen campaign points at one; a new corpus
 is a new file plus a matching conditions manifest, not an edit to an existing
 one.
 
+### Creation probe for the principal
+
+Use this small probe when an agent reads the right evidence but fails to create
+the requested file. Each trial compares the complete fixture tree to the
+expected result, checks unchanged inputs byte for byte and treats closure as
+a separate observation. A completed pytest case does not count as a model
+success. The scripted control must actually create and read back the file.
+
+```bash
+LITELLM_LOCAL_MODEL_COST_MAP=True uv run python -m pytest -p tests.conftest \
+  bench/test_reasoning_creation.py -q
+```
+
+To collect live rows, add `INFINIDEV_REASONING_EVAL_LIVE=1` and `-s`, with the
+local Qwen endpoint available on port 8080. The probe runs sequentially with
+fresh temporary workspaces and the principal's tool runtime. It permits only
+workspace tools and checks resolved paths against each fixture. Inspect
+`CREATION_PROBE` rows for offered tools, dispatched tool names and hashes,
+artifact correctness, closure, budget, latency and tokens. No model text or
+tool bodies are written to the report. Use `-k profile`, `-k catalog` or
+`-k metadata` to select one comparison.
+
+The November 17 exploratory round used eight tool calls, nine model
+iterations and Qwen3.8-FN-UD-IQ4_XS. Each pair changed one factor:
+
+| Difference | Successful creations with closure, base | Candidate |
+| --- | ---: | ---: |
+| Creation instruction in enabled progress discipline | 0/3 | 0/3 |
+| Remove only `edit_file` from the grant | 0/2 | 0/2 |
+| Disable per-call metadata | 0/1 | 0/1 |
+
+`create_file` was offered at the runtime boundary and never dispatched in
+these twelve live trials. The scripted controls could create and verify the
+file with either metadata schema. The initial ten live trials were
+discarded because their test configuration selected a pod backend unavailable
+in this checkout. These results describe this small set of tasks, model and
+budget. They do not justify changing the production prompt or tool policy.
+
 ### What a task record means
 
 ```json
