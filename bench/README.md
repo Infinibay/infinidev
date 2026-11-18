@@ -100,6 +100,16 @@ budget after an additional edit, with a passing artifact and no check on that
 last revision. The other tasks were `pricing-rounding` and `options-override`.
 The sample is one run per task and temperature. The default remains 0.2.
 
+A follow-up on the same backend used `test-selection` and
+`tool-failure-recovery` with seed 281. Each arm had the same native tool
+schemas, automatic tool choice, and 14-request and 14-tool-call caps per
+task. Shell checks ran in network-isolated fixtures. Both temperatures
+delivered both fixes in scope, passed the independent final gate, ran the
+available suite after the last edit, and closed via `finish_turn`. Each arm
+made 14 model requests across the two tasks. The 0.2 arm used 2,091 completion
+tokens and 35.31 seconds in the turns. The 0 arm used 2,724 and 42.09 seconds.
+These two pairs add no quality advantage for either temperature.
+
 A separate comparison held temperature at 0.2 and seed at 147, and
 changed `chat_template_kwargs.enable_thinking` on the same Basalt endpoint.
 The first pass also sent Infinidev's legacy `/no_think` hint in both arms.
