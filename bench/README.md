@@ -136,6 +136,14 @@ total includes different tool trajectories. It cannot isolate the cost
 or effect of the three 212-byte messages. The probe stayed outside the
 runtime.
 
+Two native Qwen3.8 smokes on Basalt used a tool cap of one and a model
+cap of two. The scripted first response requested an edit alone or an
+edit followed by a verification read. The edit was the only dispatch in
+both cases. The one remaining model request carried the native results with
+no tool schemas. Both reports described the edit and identified the read as
+pending. The host kept the `exhausted` outcome. These smokes verify recovery
+after a known tool-budget boundary.
+
 The scope comparison authorizes the literal destination through the existing
 `allowed_paths` permission mode. The catalog and task stay fixed. The offline
 control attempts two edits to a protected file before successfully creating
