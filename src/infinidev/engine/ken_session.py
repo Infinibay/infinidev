@@ -601,6 +601,9 @@ def get_ken_session(
         return None
 
     if workspace is None:
+        # The pipeline asks Ken before the agent activates its tool context.
+        workspace = os.environ.get("INFINIDEV_WORKSPACE") or None
+    if workspace is None:
         try:
             from infinidev.tools.base.context import get_current_workspace_path
 

@@ -557,6 +557,38 @@ def test_the_same_session_is_shared_across_call_sites(workspace):
     assert get_ken_session(workspace, "sess-2") is not first
 
 
+def test_rank_and_turn_end_use_the_configured_workspace(
+    tmp_path, workspace, posted, monkeypatch,
+):
+    from infinidev.engine.orchestration.pipeline import (
+        _ken_turn_context,
+        _report_turn_end_to_ken,
+    )
+
+    other = tmp_path / "other"
+    (other / ".ken").mkdir(parents=True)
+    (other / ".ken" / "daemon.port").write_text("54322")
+    (other / ".ken" / "meta.json").write_text(json.dumps({"auth_token": "other"}))
+    monkeypatch.chdir(other)
+    monkeypatch.setattr("infinidev.tools.base.context.get_current_workspace_path",
+                        lambda: str(other))
+    monkeypatch.setenv("INFINIDEV_WORKSPACE", str(workspace))
+
+    assert "<context-rank/>" in _ken_turn_context("Find the source.", "sess-1")
+    assert len(posted) == 2
+    assert posted[0][1]["cwd"] == str(workspace)
+    assert get_ken_session(session_id="sess-1") is get_ken_session(workspace, "sess-1")
+    _report_turn_end_to_ken("Found it.", "sess-1")
+    assert [url for url, _, _ in posted] == [
+        "http://127.0.0.1:54321/sessions/start",
+        "http://127.0.0.1:54321/prompts",
+        "http://127.0.0.1:54321/turn-end",
+    ]
+
+    get_ken_session(other, "sess-2").start()
+    assert posted[-1][0] == "http://127.0.0.1:54322/sessions/start"
+
+
 # ── the pipeline reads the answers ───────────────────────────────────────
 #
 # Posting to Ken is the expensive half. These cover the half that pays for
