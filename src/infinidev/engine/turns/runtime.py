@@ -65,6 +65,7 @@ logger = logging.getLogger(__name__)
 
 _TOOL_LIMIT_MESSAGE = 'Conversation interrupted: tool call limit reached.'
 _OUTPUT_LIMIT_MESSAGE = 'Conversation interrupted: model output token limit reached.'
+_RETAINED_EVIDENCE_LIMIT = 40
 _VERIFICATION_FEEDBACK = {
     'stale': 'Host verification: the workspace changed after the last recognized test command '
              'returned exit 0. The current revision still needs verification.',
@@ -197,7 +198,7 @@ def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
         if isinstance(run_id := receipt.get('run_id'), str):
             previous_run_id = run_id
         references = data.get('evidence', [])
-        references = [value for value in references[-40:]
+        references = [value for value in references[-_RETAINED_EVIDENCE_LIMIT:]
                       if isinstance(value, str) and ' turn_provenance_' not in value]
         state = TurnState.model_validate({
             **data, 'evidence_sources': {}, 'previous_interruption': None,
@@ -651,10 +652,12 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                  else max_total_tool_calls)
 
     def retain_evidence(reference: str, source: EvidenceSource | None = None) -> None:
+        if reference in references:
+            references.remove(reference)
         references.append(reference)
         if source is not None:
             state.evidence_sources[reference] = source
-        if len(references) > 40:
+        if len(references) > _RETAINED_EVIDENCE_LIMIT:
             state.evidence_sources.pop(references.pop(0), None)
 
     def owns_work_snapshot(current: Any) -> bool:
@@ -669,7 +672,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         saved_receipt = {**receipt, 'closure': 'unclosed'} if checkpoint else receipt
         try:
             saved = {
-                **_bounded_state(state), 'evidence': references[-40:], 'receipt': saved_receipt,
+                **_bounded_state(state), 'evidence': references[-_RETAINED_EVIDENCE_LIMIT:],
+                'receipt': saved_receipt,
                 'evidence_sources': {ref: source.model_dump(exclude_none=True)
                                      for ref, source in state.evidence_sources.items()},
             }
@@ -805,7 +809,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 recorder.attach(messages[-1], node)
         prior = _bounded_state(state)
         if state.previous_interruption is not None:
-            prior['previous_interruption'] = state.previous_interruption.model_dump()
+            prior['previous_interruption'] = state.previous_interruption.model_dump(exclude_none=True)
         if state.previous_checkpoint is not None:
             prior['previous_checkpoint'] = state.previous_checkpoint.model_dump()
         if verification is not None and verification.from_prior_turn:
@@ -860,6 +864,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         reported_archive_revisions: dict[str, str] = {}
         prior_verification_status = verification.status if verification is not None else None
         read_repetition = ReadRepetitionGuard()
+        read_archives: dict[tuple[str, FileReadObservation | None], str] = {}
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
@@ -874,6 +879,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 return outcome('exhausted', _TOOL_LIMIT_MESSAGE)
             if not reporting_only and read_repetition.exhausted:
                 trace('read_repetition_cutoff')
+                receipt['stop_reason'] = 'repeated_read_evidence'
                 return outcome('exhausted', 'Conversation interrupted: repeated read-only batches '
                                'returned evidence already observed in this turn.')
             if not context_repaired and ContextManager.under_context_pressure(
@@ -1178,6 +1184,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     previous_plan = state.plan
                     previous_test = verification.observation if verification is not None else None
                     new_test = False
+                    read_signature = None
                     tool = ctx.tool_dispatch[call.function.name]
                     workspace_effect = may_change_workspace(
                         call.function.name, getattr(tool, 'effects', None))
@@ -1215,14 +1222,14 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                   output_sha256=output_sha256,
                                   output_bytes=len(body.encode()))
                             if read_batch is not None:
-                                signature = None if attachments else read_result_signature(
+                                read_signature = None if attachments else read_result_signature(
                                     call.function.name, args, getattr(tool, 'effects', None),
                                     body, output_sha256,
                                 )
-                                if signature is None:
+                                if read_signature is None:
                                     read_batch = None
                                 else:
-                                    read_batch.append(signature)
+                                    read_batch.append(read_signature)
                         if verification is not None:
                             new_test = (verification.observation is not None
                                         and verification.observation is not previous_test)
@@ -1239,13 +1246,23 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         source = _recalled_file_source(state.evidence_sources, recalled_ref, body)
                         if source is not None:
                             recalled_files[recalled_ref] = source
-                    reference = '' if recalled_ref is not None else _archive(
-                        ctx, iterations, call.function.name, args, body)
+                    file_read = file_reads[0] if len(file_reads) == 1 and not engine.is_cancelled else None
+                    read_key = None
+                    if (recalled_ref is None and read_signature
+                            and (call.function.name != 'read_file' or file_read is not None)):
+                        read_key = (read_signature, file_read)
+                        reference = read_archives.get(read_key, '')
+                    if recalled_ref is None and reference not in state.evidence_sources:
+                        reference = _archive(ctx, iterations, call.function.name, args, body)
+                        if read_key and reference:
+                            read_archives[read_key] = reference
+                            if len(read_archives) > _RETAINED_EVIDENCE_LIMIT:
+                                read_archives.pop(next(iter(read_archives)))
                     if reference:
                         if call.function.name not in {'finish_turn', 'update_plan'}:
-                            file_read = file_reads[0] if len(file_reads) == 1 and not engine.is_cancelled else None
-                            retain_evidence(reference, _evidence_source(
-                                call.function.name, args, workspace_path, file_read))
+                            source = state.evidence_sources.get(reference) or _evidence_source(
+                                call.function.name, args, workspace_path, file_read)
+                            retain_evidence(reference, source)
                     if new_test and verification.result_matches_output:
                         verification.observation.locator = reference or None
                     if workspace_effect or state.plan is not previous_plan:

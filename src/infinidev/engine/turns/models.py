@@ -41,6 +41,7 @@ class PreviousInterruption(BaseModel):
 
     status: Literal["cancelled", "exhausted", "failed"]
     dispatches: int = Field(ge=0, strict=True)
+    stop_reason: Literal["repeated_read_evidence"] | None = None
 
 
 class PreviousCheckpoint(BaseModel):

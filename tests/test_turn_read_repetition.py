@@ -11,6 +11,7 @@ from infinidev.engine.turns import runtime as turn_runtime
 from infinidev.tools.file.code_search_tool import CodeSearchTool
 from infinidev.tools.file.edit_file_tool import EditFileTool
 from infinidev.tools.file.read_file_tool import ReadFileTool
+from infinidev.tools.meta.recall_context_tool import RecallContextTool
 from tests.test_turn_runtime import reply, runtime, tc
 
 
@@ -64,6 +65,66 @@ def test_distinct_files_with_identical_contents_are_new_evidence(
     assert result.status == "answered"
     assert engine._last_turn_receipt["dispatches"] == 8
     assert not any(has_warning(request) for request in seen)
+
+
+def test_resume_after_read_loop_reuses_distinct_evidence(
+    runtime, workspace_dir, tool_context, auto_approve_permissions, sandbox_disabled,
+):
+    from infinidev.db.service import get_session_runtime_state
+
+    engine, agent, script, seen = runtime
+    (workspace_dir / "cycle.py").write_text("VALUE_FOR_SEARCH = 1\nOTHER_VALUE = 2\n")
+    agent.tools = [CodeSearchTool(), RecallContextTool()]
+    script(reply("", search(-1, "OTHER_VALUE")), *(
+        reply("", *(search(batch * 9 + index) for index in range(9))) for batch in range(5)
+    ))
+    assert engine.run_turn(agent, "Find both values.", max_iterations=0,
+                           max_total_tool_calls=0).status == "exhausted"
+
+    saved = get_session_runtime_state(tool_context.session_id)["ui_state"]["conversation"]
+    assert saved["receipt"]["dispatches"] == 46
+    assert len(saved["evidence"]) == 2
+    first_reference = saved["evidence"][0].split("reference: ", 1)[1].removesuffix("]")
+
+    engine.begin_turn()
+    script(reply("", tc("recall_context", reference=first_reference)),
+           reply("", tc("finish_turn", message="Used the earlier observation.")))
+    assert engine.run_turn(agent, "Continue using the earlier evidence.").status == "answered"
+
+    prior_message = next(item["content"] for item in seen[-2][0]
+                         if item["content"].startswith("<prior_state_context>"))
+    prior = json.loads(prior_message.splitlines()[1])
+    assert prior["previous_interruption"]["stop_reason"] == "repeated_read_evidence"
+    assert len(prior["evidence"]) == 2
+    tool_body = next(item["content"] for item in seen[-1][0] if item["role"] == "tool")
+    assert "OTHER_VALUE = 2" in json.loads(tool_body)["content"]
+
+
+def test_same_slice_of_changed_file_gets_a_new_archive(
+    runtime, workspace_dir, tool_context, auto_approve_permissions, sandbox_disabled,
+):
+    from infinidev.db.service import get_session_runtime_state
+
+    engine, agent, script, seen = runtime
+    path = workspace_dir / "versioned.py"
+    path.write_text("PINNED = 1\nOUTSIDE_SLICE = 2\n")
+    agent.tools = [ReadFileTool()]
+    read = reply("", tc("read_file", file_path=path.name, limit=1))
+
+    def read_changed_file():
+        path.write_text("PINNED = 1\nOUTSIDE_SLICE = 333\n")
+        return read
+
+    script(read, read_changed_file, reply("", tc("finish_turn", message="Done.")))
+    assert engine.run_turn(agent, "Read the first line again after the change.").status == "answered"
+    outputs = [item["content"].split("\n[Archived evidence", 1)[0]
+               for item in seen[-1][0] if item["role"] == "tool"]
+    assert outputs == ["     1\tPINNED = 1"] * 2
+    saved = get_session_runtime_state(tool_context.session_id)["ui_state"]["conversation"]
+    first, second = saved["evidence"]
+    assert first != second
+    assert (saved["evidence_sources"][first]["file_fingerprint"]
+            != saved["evidence_sources"][second]["file_fingerprint"])
 
 
 @pytest.mark.parametrize("progress", ["new_result", "guidance", "write_in_batch"])
