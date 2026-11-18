@@ -223,6 +223,16 @@ criterion even though `auto` created and reread the file. The fixture checks
 recognize a bounded set of source forms. This exploratory sample supports
 offering the option with the original default.
 
+### Recovering from a premature close
+
+Two native-tool probes on Qwen3.8 over Basalt scripted a first response that
+mixed `finish_turn` with valid edits to one or two files. In both cases the
+host rejected the batch before any file changed and sent per-call feedback
+on the next request. The live model resubmitted the edits, read every revised
+file, and closed separately in four live requests per fixture. Both final
+workspaces matched the expected files. These probes exercise recovery from a
+given invalid response. Their initial response was scripted.
+
 ### Verification counterexamples
 
 Three Qwen pairs offered the same fixture checker with the same prompts and
