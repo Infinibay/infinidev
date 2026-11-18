@@ -1588,6 +1588,7 @@ def _run_principal_turn(
     final_message_hash = None
     parent_guidance: list[InjectedUserMessage] = []
     dispatched_tools: Counter[str] = Counter()
+    check_at_exhaustion = False
 
     def publish(message: str, *, final: bool = False) -> None:
         nonlocal reply_marked, history_initialized, final_message_hash
@@ -1669,22 +1670,38 @@ def _run_principal_turn(
                 result = "Conversation failed: the agent returned an invalid turn result."
             if getattr(engine, "is_cancelled", False):
                 status, result = "cancelled", "Conversation cancelled."
+            exhausted = status == "exhausted"
+            if verify_delivery is not None and exhausted:
+                # A budget report may contain model-authored delivery text.
+                result = "Conversation exhausted its budget before delivery verification."
             feedback = None
-            if verify_delivery is not None and status == "answered":
+            if verify_delivery is not None and (
+                status == "answered" or (exhausted and check_at_exhaustion)
+            ):
                 dispatched_tools.update(turn.dispatched_tools)
                 draft = DeliveryDraft(
-                    tuple(map(redact, turn.public_messages)),
+                    () if exhausted else tuple(map(redact, turn.public_messages)),
                     redact(result),
                     MappingProxyType(dict(dispatched_tools)),
+                    status="exhausted" if exhausted else "answered",
                 )
                 try:
                     verdict = verify_delivery(draft)
                 except Exception as exc:
                     logger.warning("Delivery verifier raised %s", type(exc).__name__)
-                    status, result = "failed", "Conversation failed: delivery verification failed."
+                    if exhausted:
+                        result = "Conversation exhausted its budget. Delivery verification failed."
+                    else:
+                        status = "failed"
+                        result = "Conversation failed: delivery verification failed."
                     break
                 if getattr(engine, "is_cancelled", False):
                     status, result = "cancelled", "Conversation cancelled."
+                    break
+                if exhausted:
+                    verification = ("The delivery verifier accepted the workspace."
+                                    if verdict is None else "Delivery verification failed.")
+                    result = "Conversation exhausted its budget. " + verification
                     break
                 feedback = verdict.feedback if isinstance(verdict, DeliveryRevision) else verdict
                 if verdict is None:
@@ -1705,15 +1722,13 @@ def _run_principal_turn(
                         tool_grant.validate()
                         chosen = select_tool_names(tool_grant, verdict.tool_names)
                         tool_grant = freeze_task_tools(tool_grant, chosen)
+                        check_at_exhaustion = verdict.check_at_exhaustion is True
                     except (TypeError, ValueError):
                         status = "failed"
                         result = (
                             "Conversation failed: delivery verifier returned an invalid revision tool grant."
                         )
                         break
-            elif verify_delivery is not None and status == "exhausted":
-                # A budget report may contain model-authored delivery text.
-                result = "Conversation exhausted its budget before delivery verification."
             if pass_index:
                 break
             followup = feedback if feedback is not None else _task_end_hook(

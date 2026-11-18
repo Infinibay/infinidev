@@ -84,6 +84,7 @@ class DeliveryDraft:
     public_messages: tuple[str, ...]
     message: str
     dispatched_tools: Mapping[str, int]
+    status: Literal["answered", "exhausted"] = "answered"
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ class DeliveryRevision:
 
     feedback: str
     tool_names: tuple[str, ...]
+    check_at_exhaustion: bool = False
 
 
 class TurnResult(BaseModel):

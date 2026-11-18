@@ -92,6 +92,14 @@ for that revision. An empty tuple leaves only the principal's built-in
 plan and close tools. Unknown, ungranted or duplicate names cause a
 verification failure.
 
+For a verifier that checks workspace artifacts, set
+`check_at_exhaustion=True` on the `DeliveryRevision`. If the revision
+uses up its budget, the callable gets one final check with
+`draft.status == "exhausted"`, the cumulative dispatch counts and a
+host-authored status. Returning `None` records that the verifier
+accepted the workspace. The turn status remains exhausted and the
+model's unfinished draft stays unpublished.
+
 The verifier checks the revised draft before publication. Rejection of
 the revision, verifier failure, or budget exhaustion produces a status
 message. File changes already made by the turn remain available for

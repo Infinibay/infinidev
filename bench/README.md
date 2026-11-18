@@ -521,6 +521,24 @@ The output still failed the stricter checker, which required the exact
 script from the reference fixture. The pipeline withheld both drafts.
 This checks the operation limit independently of artifact acceptance.
 
+### Functional verification after a bounded repair
+
+The cart fixture started with a scripted edit using Python's nearest-even
+rounding. The existing functional contract ran in a network-isolated,
+read-only workspace. We compared a generic rejection with the actual
+failing assertions using identical tools, temperature, seed and limits.
+Both attempts used all five revision requests without reaching a second
+verdict. Running the contract separately on each final workspace passed.
+
+A further live diagnostic run produced a passing patch and closed through
+`finish_turn` in four requests. This single repeat cannot distinguish a
+diagnostic effect from variation. The new exhaustion check did not
+intervene in that run. An offline replay ended the revision at its
+request limit and ran the opt-in check on both saved patches and the
+known-bad version. The two repaired workspaces passed and the bad one
+failed. All three kept the exhausted status and used no extra model
+requests.
+
 ### What a task record means
 
 ```json

@@ -216,6 +216,43 @@ def test_delivery_revision_cannot_expand_or_duplicate_the_original_grant(boundar
     hooks.notify.assert_called_once_with("Infinidev", result, "agent")
 
 
+@pytest.mark.parametrize("check_at_exhaustion,accepted", [(False, False), (True, False), (True, True)])
+def test_revision_verifier_can_check_workspace_at_exhaustion(boundary, check_at_exhaustion,
+                                                             accepted):
+    from infinidev.engine.turns.models import DeliveryRevision
+
+    _, engine, hooks = boundary
+    edit = SimpleNamespace(name="edit_file")
+    boundary[0].tools = [edit]
+    engine.run_turn.side_effect = [
+        TurnResult(message="Rejected proposal", status="answered", state=TurnState(),
+                   dispatched_tools={"finish_turn": 1},
+                   metrics={"observed_iterations": 2, "observed_tool_calls": 1}),
+        TurnResult(message="Unverified budget report", public_messages=["Unverified draft"],
+                   status="exhausted", state=TurnState(), dispatched_tools={"edit_file": 1}),
+    ]
+    verify = Mock(side_effect=[
+        DeliveryRevision("Fix the failing test.", ("edit_file",),
+                         check_at_exhaustion=check_at_exhaustion),
+        None if accepted else "The test still fails.",
+    ])
+
+    result = call(boundary, verify_delivery=verify)
+    assert "exhausted its budget" in result
+    assert ("accepted the workspace" in result) is accepted
+    assert "Unverified" not in result
+    assert engine.run_turn.call_count == 2
+    assert verify.call_count == (2 if check_at_exhaustion else 1)
+    if check_at_exhaustion:
+        final = verify.call_args.args[0]
+        assert final.status == "exhausted"
+        assert final.public_messages == ()
+        assert "Unverified" not in final.message
+        assert final.dispatched_tools == {"finish_turn": 1, "edit_file": 1}
+    hooks.notify.assert_called_once_with("Infinidev", result, "agent")
+    hooks.on_status.assert_any_call("warn", "Conversation status: exhausted.")
+
+
 @pytest.mark.parametrize("bad", [None, "Done", SimpleNamespace(status="completed", message="ok"),
                                   TurnResult(message="", status="answered", state=TurnState())])
 def test_invalid_result_fails_closed(boundary, monkeypatch, bad):
