@@ -539,6 +539,13 @@ known-bad version. The two repaired workspaces passed and the bad one
 failed. All three kept the exhausted status and used no extra model
 requests.
 
+A paired follow-up supplied the remaining numeric budget near the cutoff
+in the Cart revision. The two controls produced passing workspaces and
+exhausted their budgets. With the notice, one trial closed and one
+exhausted its budget. Both workspaces failed the functional gate. This
+was one fixture with two paired seeds. The pacing notice stayed in the
+probe.
+
 ### What a task record means
 
 ```json

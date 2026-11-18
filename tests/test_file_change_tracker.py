@@ -36,3 +36,19 @@ def test_two_spellings_of_one_file_are_one_change(tmp_path):
     assert len(paths) == 1, f"one file, one entry: {paths}"
     assert tracker.get_change_count(paths[0]) == 1
     assert tracker.get_action(paths[0]) == "modified"
+
+
+def test_reconcile_counts_disk_identity_when_text_capture_is_omitted(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    (tmp_path / "mod.py").write_text("value = 1\n")
+    baseline = WorkspaceBaseline.capture(str(tmp_path))
+    observed = replace(baseline.files["mod.py"], text=None)
+    monkeypatch.setattr(baseline, "current_states", lambda: {"mod.py": observed})
+
+    tracker = FileChangeTracker(baseline)
+    assert tracker.reconcile_workspace() == []
+    assert tracker.get_all_paths() == []

@@ -178,6 +178,40 @@ def test_iteration_budget(runtime):
     assert len(seen) == 1
 
 
+@pytest.mark.parametrize("reporting_request", [True, False])
+def test_exhaustion_reports_distinct_net_workspace_changes(
+    runtime, workspace_dir, reporting_request,
+):
+    engine, agent, script, seen = runtime
+    for name in ("edited.txt", "removed.txt", "restored.txt", "preexisting.txt"):
+        (workspace_dir / name).write_text("old")
+
+    class WorkspaceTool(RecordTool):
+        def _run(self, text: str) -> str:
+            path, content = text.split("=", 1)
+            target = workspace_dir / path
+            if content == "REMOVE":
+                target.unlink()
+            else:
+                target.write_text(content)
+            return text
+
+    edits = ("edited.txt=first", "edited.txt=second", "restored.txt=new",
+             "restored.txt=old", "removed.txt=REMOVE", "empty.txt=")
+    script(reply('', *(tc('record', text=edit) for edit in edits)), reply('Work interrupted.'))
+    result = engine.run_turn(agent, 'Work', task_tools=[WorkspaceTool()],
+                             max_iterations=2 if reporting_request else 1, max_total_tool_calls=6)
+    assert result.status == 'exhausted'
+    assert result.dispatched_tools == {'record': 6}
+    assert result.workspace_changes.count == 3
+    assert result.workspace_changes.paths == ('edited.txt', 'empty.txt', 'removed.txt')
+    assert engine._last_turn_receipt['workspace_change_count'] == 3
+    assert 'Host observed 3 changed files' in result.message
+    if reporting_request:
+        assert 'Host observed 3 changed files' in seen[-1][0][-1]['content']
+        assert 'restored.txt' not in seen[-1][0][-1]['content']
+
+
 @pytest.mark.parametrize('report_kind', [
     'plain', 'action', 'fenced_action', 'with_example', 'truncated', 'transport_failure',
 ])

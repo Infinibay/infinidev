@@ -39,6 +39,14 @@ has a request available, the principal can use one request with no tool
 schemas to report the observed results and remaining work. The turn still
 ends as `exhausted`, and that report adds no tool attempts.
 
+If a workspace baseline is available, the report request includes the host's
+observed net changes. The final status includes a count of distinct changed
+paths and a bounded preview, even when the model-call limit prevents a
+report request. The count compares file presence and observed content
+identity against turn start, so repeated edits contribute one path and
+restored files disappear. The SDK exposes this observation as
+`TurnResult.workspace_changes`.
+
 A response cut off by the provider output limit is discarded before dispatch
 or public delivery. With model requests left, the principal can try once more
 in the same turn and request a shorter answer or a smaller complete tool call.

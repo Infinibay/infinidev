@@ -167,18 +167,30 @@ def test_unverified_delivery_is_withheld(boundary, feedback, used, attempts, dia
 
 
 def test_delivery_verifier_cannot_be_bypassed_by_a_budget_report(boundary):
+    from infinidev.engine.turns.models import WorkspaceChangeSummary
+
     _, engine, hooks = boundary
     engine.run_turn.return_value = TurnResult(
         message="Conversation interrupted.\nUnverified proposed script.",
         status="exhausted", state=TurnState(),
+        workspace_changes=WorkspaceChangeSummary(1, ("example.py",)),
     )
+    engine.has_file_changes = Mock(return_value=False)
+    engine._last_turn_receipt = {
+        "dispatches": 2, "closure": "interrupted", "run_id": "example", "workspace_change_count": 1,
+    }
     verify = Mock(return_value=None)
 
     result = call(boundary, verify_delivery=verify)
     assert "before delivery verification" in result
     assert "Unverified proposed script." not in result
+    assert 'Host observed 1 changed file' in result and 'example.py' in result
     verify.assert_not_called()
     hooks.notify.assert_called_once_with("Infinidev", result, "agent")
+    hooks.on_status.assert_any_call(
+        "info", "Host record: 2 tool dispatches; workspace changed: True; "
+        "closure: interrupted; trace: example.",
+    )
 
 
 @pytest.mark.parametrize("explicit_grant,tool_names", [

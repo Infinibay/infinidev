@@ -68,12 +68,13 @@ class FileChangeTracker:
         self._active = True
         return changed
 
-    def reconcile_workspace(self) -> None:
-        """Merge final on-disk changes that bypassed known edit tools."""
+    def reconcile_workspace(self) -> list[str] | None:
+        """Merge on-disk changes and return the observed net workspace paths."""
 
         if self._baseline is None:
-            return
+            return None
         current = self._baseline.current_states()
+        changed = []
         recorded = {
             os.path.relpath(path, self._baseline.root)
             for path in self._current
@@ -84,7 +85,9 @@ class FileChangeTracker:
             before_state = self._baseline.files.get(relative)
             after_state = current.get(relative)
             path = os.path.join(self._baseline.root, relative)
-            if before_state == after_state:
+            before_digest = before_state.digest if before_state is not None else None
+            after_digest = after_state.digest if after_state is not None else None
+            if before_digest == after_digest:
                 # Disk truth wins over an earlier tool record: a later shell
                 # command may have restored the original content, or removed
                 # a file that was newly created during this task. Drop the
@@ -96,6 +99,7 @@ class FileChangeTracker:
                 self._reasons.pop(path, None)
                 self._deleted_symbols.pop(path, None)
                 continue
+            changed.append(relative)
             before = before_state.text if before_state is not None else ""
             after = after_state.text if after_state is not None else ""
             # Oversized files are still detected, but their full text is not
@@ -117,6 +121,7 @@ class FileChangeTracker:
             reason = "Detected from task-start workspace baseline"
             if reason not in self._reasons.get(path, []):
                 self._reasons.setdefault(path, []).append(reason)
+        return changed
 
     @property
     def active(self) -> bool:

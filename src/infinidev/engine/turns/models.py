@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import json
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -96,6 +97,32 @@ class DeliveryRevision:
     check_at_exhaustion: bool = False
 
 
+@dataclass(frozen=True)
+class WorkspaceChangeSummary:
+    """Net changes from the workspace baseline, with a bounded path preview."""
+
+    count: int
+    paths: tuple[str, ...]
+
+    @classmethod
+    def from_paths(cls, paths: list[str]) -> WorkspaceChangeSummary:
+        """Keep the full count and bound the displayed paths."""
+        preview = tuple(path for path in paths[:12] if len(json.dumps(path)) <= 200)
+        return cls(len(paths), preview)
+
+    def render(self) -> str:
+        """Render a host observation for the user or a budget-report request."""
+        noun = "file" if self.count == 1 else "files"
+        text = f"Host observed {self.count} changed {noun} in the workspace since turn start."
+        if self.paths:
+            paths = ", ".join(json.dumps(path).replace('<', r'\u003c') for path in self.paths)
+            text += f" Observed paths include {paths}."
+        omitted = self.count - len(self.paths)
+        if omitted:
+            text += f" The path preview omits {omitted}."
+        return text
+
+
 class TurnResult(BaseModel):
     """A conversation outcome, independent of work Task lifecycle."""
 
@@ -105,6 +132,7 @@ class TurnResult(BaseModel):
     status: Literal["answered", "cancelled", "exhausted", "failed"]
     state: TurnState
     public_messages: list[str] = Field(default_factory=list)
+    workspace_changes: WorkspaceChangeSummary | None = None
     dispatched_tools: dict[str, Annotated[int, Field(strict=True, ge=0)]] = Field(
         default_factory=dict,
     )

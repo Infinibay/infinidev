@@ -1589,6 +1589,7 @@ def _run_principal_turn(
     parent_guidance: list[InjectedUserMessage] = []
     dispatched_tools: Counter[str] = Counter()
     check_at_exhaustion = False
+    withheld_workspace = None
 
     def publish(message: str, *, final: bool = False) -> None:
         nonlocal reply_marked, history_initialized, final_message_hash
@@ -1674,6 +1675,7 @@ def _run_principal_turn(
             if verify_delivery is not None and exhausted:
                 # A budget report may contain model-authored delivery text.
                 result = "Conversation exhausted its budget before delivery verification."
+                withheld_workspace = turn.workspace_changes
             feedback = None
             if verify_delivery is not None and (
                 status == "answered" or (exhausted and check_at_exhaustion)
@@ -1803,6 +1805,8 @@ def _run_principal_turn(
     finally:
         agent.deactivate()
 
+    if status == "exhausted" and withheld_workspace is not None:
+        result += "\n\n" + withheld_workspace.render()
     _store_task_hook_note(session_id, _task_end_hook(
         UserHookEvent.TASK_END_SUMMARY,
         user_input=user_input, session_id=session_id, result=result,
@@ -1814,9 +1818,12 @@ def _run_principal_turn(
     receipt = getattr(engine, '_last_turn_receipt', None)
     if isinstance(receipt, dict):
         test_revision = receipt.get('test_verification')
+        changed = receipt.get('workspace_change_count')
+        if changed is None:
+            changed = _turn_changed_files(engine)
         hooks.on_status('info',
             f"Host record: {receipt['dispatches']} tool dispatches; "
-            f"workspace changed: {bool(_turn_changed_files(engine))}; "
+            f"workspace changed: {bool(changed)}; "
             f"closure: {receipt['closure']}; trace: {receipt['run_id']}.")
         if test_revision is not None:
             origin = " (prior turn)" if receipt.get("test_verification_origin") == "prior_turn" else ""

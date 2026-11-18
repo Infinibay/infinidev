@@ -46,7 +46,7 @@ from infinidev.engine.turns.context_recovery import (
 )
 from infinidev.engine.turns.models import (
     EvidenceSource, PreviousCheckpoint, PreviousInterruption, TestObservation, TurnResult,
-    TurnState,
+    TurnState, WorkspaceChangeSummary,
 )
 from infinidev.engine.turns.read_repetition import ReadRepetitionGuard, read_result_signature
 from infinidev.engine.turns.tools import build_turn_tools
@@ -694,8 +694,13 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         if status != 'answered' and validation_diagnostics:
             message += '\nRejected tool batches (no calls executed in these batches):\n'
             message += '\n'.join(validation_diagnostics)
+        workspace_changes = None
         if engine._last_file_tracker is not None:
-            engine._last_file_tracker.reconcile_workspace()
+            paths = engine._last_file_tracker.reconcile_workspace()
+            if status == 'exhausted' and iterations and paths is not None:
+                workspace_changes = WorkspaceChangeSummary.from_paths(paths)
+                receipt['workspace_change_count'] = workspace_changes.count
+                message += '\n\n' + workspace_changes.render()
         if verification is not None and verification.status is not None:
             if status == 'cancelled':
                 receipt['test_verification'] = 'unconfirmed'
@@ -719,6 +724,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             persist_work()
         return TurnResult(message=message, status=status, state=state, engine=engine,
                           public_messages=list(public_messages),
+                          workspace_changes=workspace_changes,
                           dispatched_tools=dict(dispatched_tools), metrics={
             'observed_iterations': iterations,
             'observed_tool_calls': legacy_state.total_tool_calls,
@@ -922,6 +928,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                           'Host: the tool call limit has been reached. Summarize the work and '
                           'results already observed, including unfinished work. No tools are '
                           'available for this report.'}
+                paths = tracker.reconcile_workspace()
+                if paths is not None:
+                    notice['content'] += '\n' + WorkspaceChangeSummary.from_paths(paths).render()
                 messages.append(notice)
                 if recorder is not None:
                     recorder.attach(messages[0], recorder.source(
