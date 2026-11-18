@@ -70,8 +70,14 @@ HTTP 400 errors. Parameter support and programming quality are separate checks.
 At fixed temperature and seed, valid pairs of `top_p`, `top_k` and `min_p`
 also returned different text hashes on one synthetic prompt per parameter.
 These were endpoint checks. The programming comparison varied temperature only.
-Separately, Strata's own OpenAI-compatible HTTP tests cover overriding server
-sampling defaults per request using a mock engine.
+
+An isolated transport probe sent requests from Infinidev through LiteLLM to
+Strata `c1ff07f1`, using Strata's HTTP server and a recording mock engine.
+`INFINIDEV_LLM_TEMPERATURE=-1` inherited the server's configured 0.6.
+Explicit values 0 and 0.35 reached the sampler, as did `top_p=0.55`,
+`top_k=12`, `min_p=0.08` and `seed=147`. The probe supplied `top_k` and `min_p`
+as API extensions through `extra_body`. The programming results below use
+Basalt.
 
 A second temperature comparison used three editing tasks from
 `engine_eval_v8.tasks.jsonl` on Basalt 0.2.1 and Qwen3.8-FN-UD-IQ4_XS. Both
