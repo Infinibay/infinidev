@@ -36,6 +36,38 @@ class TestExecuteCommand:
         assert description is not None
         assert "prior shell `cd` does not persist" in description
 
+    @pytest.mark.parametrize("directory_word,expected_marker", [
+        ('"$CHECK_SUBDIR"', "expanded"),
+        ("'\u0024CHECK_SUBDIR'", "literal"),
+        ("~", "expanded"),
+        ("nested*", "expanded"),
+        ("-", "expanded"),
+    ])
+    def test_dispatch_preserves_shell_cd_path_semantics(
+        self, directory_word, expected_marker, workspace_dir,
+        bound_tool, auto_approve_permissions,
+    ):
+        nested = workspace_dir / "nested project"
+        nested.mkdir()
+        (nested / "marker.txt").write_text("expanded\n")
+        literal = workspace_dir / "$CHECK_SUBDIR"
+        literal.mkdir()
+        (literal / "marker.txt").write_text("literal\n")
+        tool = bound_tool(ExecuteCommandTool)
+
+        result = execute_tool_call({tool.name: tool}, tool.name, {
+            "command": f"cd {directory_word} && cat marker.txt",
+            "env": {
+                "CHECK_SUBDIR": nested.name,
+                "HOME": str(nested),
+                "OLDPWD": str(nested),
+            },
+        })
+
+        data = json.loads(result)
+        assert data.get("exit_code") == 0, data
+        assert data["stdout"].splitlines()[-1] == expected_marker
+
     @pytest.mark.parametrize("target_repository", [False, True])
     @pytest.mark.parametrize("use_prelude", [False, True])
     def test_relative_cwd_uses_the_tools_repository_or_workspace(

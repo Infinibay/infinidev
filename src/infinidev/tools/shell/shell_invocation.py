@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import shutil
 
 
 _LEADING_CD_RE = re.compile(
-    r"^\s*cd\s+(?P<path>'[^']*'|\"[^\"]*\"|[^\s;&|`$<>]+)"
-    r"\s*&&\s*(?P<command>.+)$",
+    r"^\s*cd[ \t]+(?P<path>'[^']*'|\"[^\"]*\"|[^\s;&|`$<>]+)"
+    r"[ \t]*&&\s*(?P<command>\S.*)$",
     re.DOTALL,
 )
 
@@ -18,20 +17,30 @@ _LEADING_CD_RE = re.compile(
 def split_leading_cd(command: str) -> tuple[str, str] | None:
     """Parse a strict literal ``cd PATH && COMMAND`` shell prelude.
 
-    Substitutions, redirects, and nested control operators are deliberately
-    excluded. Callers remain responsible for validating whether the parsed
-    directory is an allowed target.
+    Leave directory words requiring shell expansion or builtin semantics in
+    the original command. The caller still checks the remaining command and
+    directory under its usual permissions.
     """
     match = _LEADING_CD_RE.match(command)
     if match is None:
         return None
-    try:
-        path_tokens = shlex.split(match.group("path"))
-    except ValueError:
+    word = match.group("path")
+    if word.startswith("'") and word.endswith("'"):
+        path = word[1:-1]
+        if "'" in path:
+            return None
+    elif word.startswith('"') and word.endswith('"'):
+        path = word[1:-1]
+        if any(char in path for char in '"$`\\'):
+            return None
+    else:
+        path = word
+        if word.startswith(("~", "#")) or any(char in word for char in "'\"\\*?[]{}()"):
+            return None
+
+    if not path or path.startswith("-"):
         return None
-    if len(path_tokens) != 1:
-        return None
-    return match.group("command").strip(), path_tokens[0]
+    return match.group("command").strip(), path
 
 
 def resolve_command_cwd(
