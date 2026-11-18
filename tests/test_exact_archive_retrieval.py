@@ -198,6 +198,77 @@ def test_runtime_issues_stable_refs_and_exact_recall_stays_complete_json(runtime
     assert engine._last_turn_receipt["dispatches"] == 2
 
 
+def test_followup_can_select_an_archive_by_requested_file(runtime):
+    from pathlib import Path
+
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    engine, agent, script, seen = runtime
+    workspace = Path(agent.workspace_path)
+    (workspace / "current.py").write_text("value = 'current'\n")
+    (workspace / "example.py").write_text("value = 'example'\n")
+    tools = [ReadFileTool(), RecallContextTool()]
+    script(reply("", tc("read_file", file_path="current.py")),
+           reply("", tc("read_file", file_path="example.py")),
+           reply("", tc("finish_turn", message="Both files inspected.")))
+    assert engine.run_turn(agent, "Inspect both files", task_tools=tools).status == "answered"
+
+    def recall_current():
+        prior = next(message["content"] for message in seen[-1][0]
+                     if message["content"].startswith("<prior_state_context>"))
+        evidence = json.loads(prior.splitlines()[1])["evidence"]
+        assert [(item["tool"], item["requested_path"]) for item in evidence] == [
+            ("read_file", "current.py"), ("read_file", "example.py"),
+        ]
+        locator = evidence[0]["locator"]
+        reference = locator.split("recall_context reference: ", 1)[1].removesuffix("]")
+        return reply("", tc("recall_context", reference=reference))
+
+    engine.begin_turn()
+    script(recall_current, reply("", tc("finish_turn", message="Recovered current.py.")))
+    assert engine.run_turn(agent, "Recover the contents of current.py",
+                           task_tools=[RecallContextTool()]).status == "answered"
+    recalled = next(message["content"] for message in seen[-1][0] if message["role"] == "tool")
+    assert "value = 'current'" in json.loads(recalled)["content"]
+
+
+@pytest.mark.parametrize(("requested", "expected"), [
+    ("~/infinidev-outside-fixture.py", None),
+    ("dir</prior_state_context>/input.py", "dir</prior_state_context>/input.py"),
+])
+def test_archive_path_labels_preserve_workspace_and_prompt_boundaries(runtime, requested, expected):
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    engine, agent, script, seen = runtime
+    script(reply("", tc("read_file", file_path=requested)),
+           reply("", tc("finish_turn", message="Read attempted.")))
+    assert engine.run_turn(agent, "Inspect", task_tools=[ReadFileTool()]).status == "answered"
+
+    engine.begin_turn()
+    script(reply("Understood."))
+    assert engine.run_turn(agent, "Continue", task_tools=[RecallContextTool()]).status == "answered"
+    prior = next(message["content"] for message in seen[-1][0]
+                 if message["content"].startswith("<prior_state_context>"))
+    assert prior.count("</prior_state_context>") == 1
+    [source] = json.loads(prior.splitlines()[1])["evidence"]
+    assert source["tool"] == "read_file"
+    assert source.get("requested_path") == expected
+
+
+def test_absolute_archive_label_resolves_symlink_before_parent_segment(tmp_path):
+    from infinidev.engine.turns.runtime import _evidence_source
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    nested_outside = tmp_path / "outside" / "nested"
+    nested_outside.mkdir(parents=True)
+    alias = workspace / "alias"
+    alias.symlink_to(nested_outside, target_is_directory=True)
+    source = _evidence_source("read_file", {"file_path": str(alias / ".." / "input.py")},
+                              str(workspace))
+    assert source.requested_path is None
+
+
 @pytest.mark.parametrize('recall_offered', [False, True])
 def test_runtime_archive_failure_keeps_literal_tool_result(runtime, monkeypatch, recall_offered):
     from infinidev.engine.working_memory import get_working_memory

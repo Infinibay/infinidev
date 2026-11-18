@@ -26,11 +26,21 @@ def validate_plan(plan: list[PlanItem]) -> list[PlanItem]:
     return plan
 
 
+class EvidenceSource(BaseModel):
+    """Describe which dispatched call produced an archived result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str = Field(min_length=1, max_length=100)
+    requested_path: str | None = Field(default=None, max_length=200)
+
+
 class TurnState(BaseModel):
     """Retained context with transient conversational termination state."""
 
     plan: list[PlanItem] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    evidence_sources: dict[str, EvidenceSource] = Field(default_factory=dict, exclude=True)
     finished: bool = Field(default=False, exclude=True)
     reply: str | None = Field(default=None, exclude=True)
 

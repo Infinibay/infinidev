@@ -4,9 +4,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import Callable, Collection
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -14,6 +16,7 @@ from pydantic import ValidationError
 
 from infinidev.config.llm import get_litellm_params, provider_for_request
 from infinidev.config.model_capabilities import get_model_capabilities
+from infinidev.config.secrets import redact
 from infinidev.config.settings import settings
 from infinidev.db.service import _persist_session_runtime_field, get_session_runtime_state
 from infinidev.engine.behavior.reasoning_content import extract_reasoning, reasoning_history_fields
@@ -38,7 +41,7 @@ from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_cal
 from infinidev.engine.tool_executor import capture_pre_content, maybe_emit_file_change
 from infinidev.engine.turns.action_metadata import ActionEnvelope, transport_schema
 from infinidev.engine.turns.catalog import effective_tools
-from infinidev.engine.turns.models import TurnResult, TurnState
+from infinidev.engine.turns.models import EvidenceSource, TurnResult, TurnState
 from infinidev.engine.turns.tools import build_turn_tools
 from infinidev.engine.turns.verification import TurnTestVerification, may_change_workspace
 from infinidev.engine.workspace_baseline import WorkspaceBaseline
@@ -170,7 +173,17 @@ def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
         references = data.get('evidence', [])
         references = [value for value in references[-40:]
                       if isinstance(value, str) and ' turn_provenance_' not in value]
-        return TurnState.model_validate(data), references
+        state = TurnState.model_validate({**data, 'evidence_sources': {}})
+        sources = data.get('evidence_sources')
+        if isinstance(sources, dict):
+            for ref in references:
+                if ref not in sources:
+                    continue
+                try:
+                    state.evidence_sources[ref] = EvidenceSource.model_validate(sources[ref])
+                except ValidationError:
+                    continue
+        return state, references
     except (ValidationError, TypeError, ValueError):
         logger.warning('Ignoring invalid persisted conversation state', exc_info=True)
         return TurnState(), []
@@ -191,6 +204,26 @@ def _reference_for_tools(reference: str, tool_names: Collection[str]) -> str:
                 excerpt = f'[Archived evidence; {field} excerpt (incomplete): '
                 return excerpt + identifier[:500 - len(excerpt) - 1] + ']'
     return reference[:500]
+
+
+def _evidence_source(name: str, args: dict[str, Any], workspace: str | None) -> EvidenceSource:
+    """Keep a bounded workspace-relative label, without recording command arguments."""
+    target = args.get('file_path')
+    path = None
+    if workspace and isinstance(target, str) and target:
+        try:
+            root = Path(os.path.abspath(workspace))
+            requested = Path(target).expanduser()
+            if not requested.is_absolute():
+                requested = Path(os.path.normpath(root / requested))
+            relative = requested.relative_to(root)
+            if requested.resolve().is_relative_to(root.resolve()):
+                path = redact(relative.as_posix())
+        except (OSError, RuntimeError, ValueError):
+            pass
+    if path and len(path) > 200:
+        path = path[:199] + '…'
+    return EvidenceSource(tool=name[:100], requested_path=path)
 
 
 def _user_content(text: str, attachments: list[Any] | None, vision: bool) -> Any:
@@ -498,6 +531,13 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                  else max_total_tool_calls)
     post_tool_choice = settings.TASK_POST_TOOL_CHOICE
 
+    def retain_evidence(reference: str, source: EvidenceSource | None = None) -> None:
+        references.append(reference)
+        if source is not None:
+            state.evidence_sources[reference] = source
+        if len(references) > 40:
+            state.evidence_sources.pop(references.pop(0), None)
+
     def outcome(status: str, message: str) -> TurnResult:
         if status != 'answered' and validation_diagnostics:
             message += '\nRejected tool batches (no calls executed in these batches):\n'
@@ -519,7 +559,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
               message_sha256=hashlib.sha256(message.encode()).hexdigest(), **receipt)
         try:
             _persist_session_runtime_field(session_id, 'conversation',
-                {**_bounded_state(state), 'evidence': references[-40:], 'receipt': receipt})
+                {**_bounded_state(state), 'evidence': references[-40:], 'receipt': receipt,
+                 'evidence_sources': {ref: source.model_dump(exclude_none=True)
+                                      for ref, source in state.evidence_sources.items()}})
         except Exception:
             logger.warning('Conversation state persistence failed', exc_info=True)
         return TurnResult(message=message, status=status, state=state, engine=engine,
@@ -609,11 +651,18 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                        messages[-1]['content'], [parent] if parent else [])
                 recorder.attach(messages[-1], node)
         if state.plan or state.notes or references:
+            evidence = []
+            for ref in references:
+                locator = _reference_for_tools(ref, ctx.tool_dispatch)
+                source = state.evidence_sources.get(ref)
+                if source is not None and 'recall_context' in ctx.tool_dispatch:
+                    evidence.append({'locator': locator, **source.model_dump(exclude_none=True)})
+                else:
+                    evidence.append(locator)
+            prior_json = json.dumps({**_bounded_state(state), 'evidence': evidence},
+                                    ensure_ascii=False).replace('<', r'\u003c')
             messages.append({'role': 'user', 'content':
-                '<prior_state_context>\n' + json.dumps({**_bounded_state(state), 'evidence': [
-                    _reference_for_tools(ref, ctx.tool_dispatch) for ref in references]},
-                    ensure_ascii=False)
-                + '\n</prior_state_context>'})
+                '<prior_state_context>\n' + prior_json + '\n</prior_state_context>'})
             if recorder is not None:
                 recorder.attach(messages[-1], recorder.source(
                     'prior_state', 'user', messages[-1]['content']))
@@ -792,8 +841,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                    {'calls': rejected, 'executed': False})
                 reference = _archive(ctx, iterations, 'tool_validation_rejected', {}, report)
                 if reference:
-                    references.append(reference)
-                    references[:] = references[-40:]
+                    retain_evidence(reference)
                 details = [f"{item['tool']}.{problem['field']} ({problem['type']})"
                            for item in rejected for problem in item['errors']]
                 validation_diagnostics.append(
@@ -907,8 +955,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     reference = '' if exact_recall else _archive(
                         ctx, iterations, call.function.name, args, body)
                     if reference:
-                        references.append(reference)
-                        references[:] = references[-40:]
+                        if call.function.name not in {'finish_turn', 'update_plan'}:
+                            retain_evidence(reference, _evidence_source(
+                                call.function.name, args, workspace_path))
                         body += '\n' + reference
                 if ctx.manual_tc:
                     messages.append({'role': 'user', 'content':

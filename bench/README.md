@@ -247,6 +247,27 @@ supports keeping the option available for further evaluation. The
 experiment used an earlier wording for the notice. The released text
 identifies the observed zero exit explicitly.
 
+### Selecting historical tool output
+
+Two read-only pairs on Basalt 0.2.1 with Qwen3.8-FN-UD-IQ4_XS asked for a
+literal value from one of two archived reads of files named `config.py`
+in different directories. Each pair reused the same archive references and
+order, native automatic selection, temperature 0.2 and seed 147. The visible
+tool grant allowed recall and withheld file reads. The treatment added the
+source tool and the requested workspace-relative path to each locator.
+
+| Observation | Opaque locators | Labeled locators |
+| --- | ---: | ---: |
+| Target reference in first recall | 0/2 | 2/2 |
+| Exact target page recovered | 1/2 | 2/2 |
+| Correct final value | 0/2 | 2/2 |
+| Native `finish_turn` | 1/2 | 2/2 |
+| Recall calls | 9 | 2 |
+| Observed prompt tokens | 18,085 | 8,727 |
+
+The archives held actual dispatcher output. The probe scored retrieval and
+the final answer separately. Each arm ran once per target.
+
 ### What a task record means
 
 ```json
