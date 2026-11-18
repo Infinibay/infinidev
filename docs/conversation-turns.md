@@ -131,6 +131,10 @@ after a successful repeat check. The receipt and terminal show `current`,
 `stale`, or `unconfirmed` for the latest attempt. The receipt also records
 the time spent taking verification snapshots.
 
+A completed local check is compared against its starting revision even when
+it returns a nonzero exit. A revision change is reported in the host notice
+and receipt. The model can inspect the current files before another attempt.
+
 The principal saves a matched observation in the work checkpoint. It includes
 the archive locator when the displayed output matches the original result.
 At the next turn it compares the saved revision against a fresh workspace

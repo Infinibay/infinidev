@@ -696,6 +696,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 receipt['test_verification'] = verification.status
             if verification.from_prior_turn:
                 receipt['test_verification_origin'] = 'prior_turn'
+            if verification.workspace_changed_during_check:
+                receipt['test_workspace_changed'] = True
             receipt['test_revision_snapshot_ms'] = verification.snapshot_ns // 1_000_000
         engine._last_state = legacy_state
         engine._last_status = status
@@ -915,6 +917,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             if verification is not None and (not verification.from_prior_turn
                     or verification.status != prior_verification_status):
                 if notice_text := _VERIFICATION_FEEDBACK.get(verification.status):
+                    if verification.workspace_changed_during_check:
+                        notice_text += (' The workspace changed between the snapshots before and '
+                                        'after the check. Inspect the current files before retrying.')
                     notice = {'role': 'user', 'content': notice_text}
                     if recorder is not None:
                         recorder.attach(notice, recorder.source(

@@ -33,6 +33,7 @@ class TurnTestVerification:
         self._state = state
         self.observation: TestObservation | None = None
         self.result_matches_output = False
+        self.workspace_changed_during_check = False
         self.from_prior_turn = False
         self.status: Literal["current", "stale", "unconfirmed"] | None = None
         self.snapshot_ns = 0
@@ -66,6 +67,7 @@ class TurnTestVerification:
         """Record the original result and whether the displayed output can locate it."""
         self.observation = None
         self.result_matches_output = False
+        self.workspace_changed_during_check = False
         self.from_prior_turn = False
         self.status = "unconfirmed"
         if revision_before is None:
@@ -78,18 +80,26 @@ class TurnTestVerification:
             not isinstance(payload, dict)
             or not self._workspace_launch(payload.get("launch_cwd"))
             or type(payload.get("exit_code")) is not int
+        ):
+            return
+
+        revision_after = self.snapshot()
+        self.workspace_changed_during_check = (
+            revision_after is not None and revision_after != revision_before
+        )
+        if (
+            revision_after != revision_before
             or payload["exit_code"] != 0
             or payload.get("success") is False
             or payload.get("error")
             or annotate_test_result_payload(payload).get("test_output_conflict") is True
         ):
             return
-        if self.snapshot() == revision_before:
-            self.observation = TestObservation(
-                revision=revision_before, launch_cwd=payload["launch_cwd"],
-            )
-            self.result_matches_output = result_matches_output
-            self.status = "current"
+        self.observation = TestObservation(
+            revision=revision_before, launch_cwd=payload["launch_cwd"],
+        )
+        self.result_matches_output = result_matches_output
+        self.status = "current"
 
     def restore(self, observation: TestObservation) -> None:
         """Revalidate the saved observation before presenting it to the model."""

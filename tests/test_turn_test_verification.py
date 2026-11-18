@@ -79,6 +79,37 @@ def test_real_test_exit_is_bound_to_the_launch_directory(
     assert engine._last_turn_receipt["test_verification"] == expected
 
 
+@pytest.mark.parametrize("changes,exit_code", [(True, 1), (False, 1), (True, 0)])
+def test_model_can_see_workspace_changes_across_a_completed_check(
+    changes, exit_code, runtime, monkeypatch, workspace_dir,
+    auto_approve_permissions, sandbox_disabled,
+):
+    engine, agent, script, seen = runtime
+    monkeypatch.setattr(settings, "TASK_TEST_REVISION_FEEDBACK_ENABLED", True)
+    output = workspace_dir / "output.txt"
+    output.write_text("original\n")
+    write = "    Path('output.txt').write_text('updated\\n')\n" if changes else ""
+    (workspace_dir / "test_scope.py").write_text(
+        "from pathlib import Path\n\ndef test_scope():\n"
+        f"{write}    assert {exit_code == 0}\n"
+    )
+    check = f"{shlex.quote(sys.executable)} -m pytest -q -p no:cacheprovider test_scope.py"
+    agent.tools = [ExecuteCommandTool()]
+    script(reply("", tc("execute_command", command=check, env={
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1",
+    })), reply("", tc("finish_turn", message="Done.")))
+
+    assert engine.run_turn(agent, "Run the check.").status == "answered"
+    assert output.read_text() == ("updated\n" if changes else "original\n")
+    tool_body = next(message["content"] for message in seen[-1][0] if message["role"] == "tool")
+    assert json.JSONDecoder().raw_decode(tool_body)[0]["exit_code"] == exit_code
+    assert engine._last_turn_receipt["test_verification"] == "unconfirmed"
+    notice = seen[-1][0][-1]["content"]
+    assert "current workspace revision is unconfirmed" in notice
+    assert ("workspace changed between" in notice) is changes
+    assert engine._last_turn_receipt.get("test_workspace_changed", False) is changes
+
+
 @pytest.mark.parametrize("scenario,expected,has_locator", [
     ("redirect_to_shell", None, False),
     ("redirect_to_test", "current", True),
