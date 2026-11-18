@@ -8,7 +8,7 @@ import time
 import uuid
 from collections.abc import Callable, Collection
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -286,6 +286,7 @@ def _visible_message(message: Any) -> tuple[str, Any]:
 def _call(
     ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]],
     *, tool_choice: str | dict[str, Any],
+    named_choice_fallback: Literal['required', 'auto'],
 ) -> LLMCallResult:
     schemas = None if ctx.manual_tc else ctx.tool_schemas
     recorder = current_recorder()
@@ -300,6 +301,7 @@ def _call(
     provider_messages = [{key: value for key, value in message.items()
                           if not key.startswith('_')} for message in messages]
     response = call_llm(ctx.llm_params, provider_messages, schemas, tool_choice=tool_choice,
+        named_choice_fallback=named_choice_fallback,
         use_json_mode=False,
         on_request_metadata=ctx.on_request_metadata,
         on_thinking_chunk=caller._on_thinking_chunk,
@@ -483,6 +485,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
     max_iterations = settings.LOOP_MAX_ITERATIONS if max_iterations is None else max_iterations
     max_calls = (settings.LOOP_MAX_TOTAL_TOOL_CALLS if max_total_tool_calls is None
                  else max_total_tool_calls)
+    post_tool_choice = settings.TASK_POST_TOOL_CHOICE
 
     def outcome(status: str, message: str) -> TurnResult:
         if status != 'answered' and validation_diagnostics:
@@ -624,7 +627,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 readback_pending = False
             iterations += 1
             ctx.recording_iteration = iterations
-            tool_choice: str | dict[str, Any] = 'required' if legacy_state.total_tool_calls else 'auto'
+            tool_choice: str | dict[str, Any] = (
+                post_tool_choice if legacy_state.total_tool_calls else 'auto'
+            )
             if readback_pending:
                 if (
                     not ctx.manual_tc
@@ -642,7 +647,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             usage_before = (legacy_state.total_prompt_tokens, legacy_state.total_completion_tokens)
             call_started = time.monotonic()
             try:
-                result = _call(ctx, caller, messages, tool_choice=tool_choice)
+                result = _call(ctx, caller, messages, tool_choice=tool_choice,
+                               named_choice_fallback=post_tool_choice)
             except Exception as exc:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')

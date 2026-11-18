@@ -15,6 +15,7 @@ from tests.test_turn_runtime import reply, runtime, tc
     "scenario,expect_named",
     [
         ("enabled", True),
+        ("enabled_auto", True),
         ("edit", True),
         ("off", False),
         ("missing_reader", False),
@@ -41,6 +42,8 @@ def test_first_write_readback(
     monkeypatch.setattr(
         settings, "TASK_FIRST_WRITE_READBACK_ENABLED", scenario != "off",
     )
+    post_tool_choice = "auto" if scenario == "enabled_auto" else "required"
+    monkeypatch.setattr(settings, "TASK_POST_TOOL_CHOICE", post_tool_choice)
     monkeypatch.setattr(
         settings, "LLM_PROVIDER", "openai" if scenario == "other_provider" else "openai_compatible",
     )
@@ -97,10 +100,12 @@ def test_first_write_readback(
         assert choices == ["auto"]
         return
     assert result.status == "answered"
-    assert choices[:2] == ["auto", named if expect_named else "required"]
+    assert choices[:2] == ["auto", named if expect_named else post_tool_choice]
     assert choices[2:] == (
-        [] if close_next else [named if scenario == "failed_write" else "required"]
+        [] if close_next else [named if scenario == "failed_write" else post_tool_choice]
     )
+    if expect_named:
+        assert seen[1][2]["named_choice_fallback"] == post_tool_choice
     assert [schema["function"]["name"] for schema in seen[0][1]] == [
         schema["function"]["name"] for schema in seen[1][1]
     ]

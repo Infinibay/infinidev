@@ -90,6 +90,13 @@ manual compatibility. Results are cached by the existing capability lifecycle.
 The generic provider name alone no longer forces manual transport. Startup probes
 advertise inert functions and inspect responses; they do not execute tools.
 
+Set `INFINIDEV_TASK_POST_TOOL_CHOICE=auto` to keep automatic native tool
+selection after a tool attempt in the principal turn. The default is
+`required` when supported. The first request uses `auto` in either mode.
+The tool catalog, grants and explicit `finish_turn` protocol still apply.
+If optional readback requests a named tool and the endpoint rejects that
+selector, its fallback honors the configured choice and provider capabilities.
+
 ## Action channels and continuity
 
 Native action authority comes only from the provider's tool_calls field. Native

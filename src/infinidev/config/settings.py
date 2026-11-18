@@ -3,6 +3,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource
@@ -394,6 +395,8 @@ class Settings(BaseSettings):
     # unlimited total calls. Local Step boundaries still compact accumulated
     # context, while the loop's non-progress guards remain independent.
     TASK_MAX_TOOL_CALLS: int = 0
+    # Native selection on principal requests after a tool attempt.
+    TASK_POST_TOOL_CHOICE: Literal["required", "auto"] = "required"
     # Principal turns can request read_file once after the first successful write.
     TASK_FIRST_WRITE_READBACK_ENABLED: bool = False
     # Steps are bounded by context pressure and progress evidence, not call count.

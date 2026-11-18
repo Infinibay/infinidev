@@ -87,6 +87,27 @@ def test_tools_then_answer_and_full_repeated_catalog(runtime):
     assert all(s['function']['name'] != 'step_complete' for s in seen[0][1])
 
 
+@pytest.mark.parametrize('post_tool_choice', ['required', 'auto'])
+def test_post_tool_choice_keeps_explicit_close_and_tool_catalog(
+    runtime, monkeypatch, post_tool_choice,
+):
+    from infinidev.config.settings import settings
+
+    engine, agent, script, seen = runtime
+    monkeypatch.setattr(settings, 'TASK_POST_TOOL_CHOICE', post_tool_choice)
+    script(reply('', tc('record', text='evidence')), reply('Here is progress.'),
+           reply('', tc('finish_turn', message='Done.')))
+    result = engine.run_turn(agent, 'Investigate')
+
+    assert result.status == 'answered'
+    assert engine._last_turn_receipt['closure'] == 'finish_turn'
+    assert 'Host protocol:' in seen[2][0][-1]['content']
+    assert [kwargs['tool_choice'] for _, _, kwargs in seen] == [
+        'auto', post_tool_choice, post_tool_choice,
+    ]
+    assert all(tools == seen[0][1] for _, tools, _ in seen)
+
+
 @pytest.mark.parametrize('calls', [
     [tc('finish_turn', message='Done'), tc('record', text='must not run')],
     [tc('record', text='must not run'), tc('finish_turn', message='Done')],

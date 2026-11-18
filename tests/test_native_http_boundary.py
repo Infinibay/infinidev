@@ -174,21 +174,27 @@ def test_exact_catalog_roles_and_choice_survive_real_http(
 
 
 @pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('fallback,required_supported,expected', [
+    ('required', True, 'required'),
+    ('auto', True, 'auto'),
+    ('required', False, 'auto'),
+])
 def test_rejected_named_choice_returns_to_supported_native_choice(
-        monkeypatch, local_completion_endpoint, stream):
+        monkeypatch, local_completion_endpoint, stream, fallback, required_supported, expected):
+    from infinidev.config import model_capabilities
     from infinidev.config.llm import get_litellm_params
-    from infinidev.config.model_capabilities import get_model_capabilities
     from infinidev.engine.llm_client import call_llm
 
     endpoint, requests, reply_name, _ = local_completion_endpoint
-    messages, schemas = synthetic_request(monkeypatch, endpoint, True)
+    messages, schemas = synthetic_request(monkeypatch, endpoint, required_supported)
     reply_name[0] = 'reject_named'
     named = {'type': 'function', 'function': {'name': 'read_file'}}
     response = call_llm(get_litellm_params(), messages, schemas, tool_choice=named,
-                        retry_attempts=1, on_thinking_chunk=(lambda _: None) if stream else None)
-    assert [payload['tool_choice'] for _, payload, _ in requests] == [named, 'required']
+                        retry_attempts=1, on_thinking_chunk=(lambda _: None) if stream else None,
+                        named_choice_fallback=fallback)
+    assert [payload['tool_choice'] for _, payload, _ in requests] == [named, expected]
     assert all(payload['tools'] == schemas for _, payload, _ in requests)
-    assert get_model_capabilities().supports_tool_choice_required
+    assert model_capabilities.get_model_capabilities().supports_tool_choice_required is required_supported
     assert response.choices[0].message.tool_calls[0].function.name == 'finish_turn'
 
 

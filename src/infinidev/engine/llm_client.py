@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, Literal
 
 from infinidev.config.settings import settings
 
@@ -279,11 +279,14 @@ def call_llm(
     use_json_mode: bool = True,
     thinking_enabled: bool | None = None,
     on_request_metadata: Any | None = None,
+    *,
+    named_choice_fallback: Literal["required", "auto"] = "required",
 ) -> Any:
     """Call litellm.completion with retry for transient errors.
 
     Adapts request parameters based on probed model capabilities:
     - Downgrades tool_choice="required" → "auto" if unsupported
+    - Uses named_choice_fallback when the endpoint rejects a named selector
     - Skips response_format=json_object if unsupported
     - Injects /no_think for models with thinking sections in FC mode
 
@@ -423,7 +426,9 @@ def call_llm(
                     and getattr(exc, "status_code", None) in {400, 422}
                 ):
                     # A rejected function name selector says nothing about required.
-                    kwargs["tool_choice"] = "required" if caps.supports_tool_choice_required else "auto"
+                    kwargs["tool_choice"] = (
+                        named_choice_fallback if caps.supports_tool_choice_required else "auto"
+                    )
                     attempts += 1
                     continue
                 if requested_choice is not None and not isinstance(requested_choice, dict):

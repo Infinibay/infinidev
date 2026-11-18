@@ -124,6 +124,31 @@ arms. These small samples support keeping the switch available for evaluation
 with the default off. A named request does not certify that the model read the
 right path or checked the whole artifact.
 
+### Automatic selection after tool results
+
+Five paired Qwen trials on frozen fixtures compared `required` after the
+first tool attempt with `auto` throughout. The tool catalog, prompts, limits,
+temperature of 0.2 and per-call metadata were fixed. Named readback was
+disabled. Both selections were verified in the serialized HTTP requests.
+
+| Outcome | Required | Auto |
+| --- | ---: | ---: |
+| Complete delivery | 1/5 | 2/5 |
+| Correct artifact or diagnosis | 3/5 | 4/5 |
+| Readback criterion met | 1/5 | 5/5 |
+| Explicit closure | 3/5 | 3/5 |
+| Tool attempts | 44 | 38 |
+| Observed prompt tokens | 170,232 | 120,173 |
+| Text-only responses after tool use | 0 | 1 |
+
+The text-only response recovered through the existing closure reminder.
+With the implemented `INFINIDEV_TASK_POST_TOOL_CHOICE=auto` option,
+a replay of three of those cases measured 2/3 complete deliveries versus
+1/3 with `required`. Both replays of the creation task failed the artifact
+criterion even though `auto` created and reread the file. The fixture checks
+recognize a bounded set of source forms. This exploratory sample supports
+offering the option with the original default.
+
 ### What a task record means
 
 ```json
