@@ -144,16 +144,68 @@ def test_malformed_or_empty_manual_reply_is_not_success(runtime, monkeypatch, te
 
 def test_global_budget_stops_inside_batch(runtime):
     engine, agent, script, seen = runtime
-    script(reply('', tc('record', text='first'), tc('record', text='second')))
+    script(reply('', tc('record', text='first'), tc('record', text='second')),
+           reply('Recorded the first item. The second item is pending.'))
     result = engine.run_turn(agent, 'Work', max_total_tool_calls=1)
     assert result.status == 'exhausted'
     assert result.metrics['tool_calls'] == 1
+    assert engine._last_turn_receipt['dispatches'] == 1
+    assert 'The second item is pending.' in result.message
+    records = seen[1][0][-3:-1]
+    assert [message['role'] for message in records] == ['tool', 'tool']
+    assert records[0]['content'].startswith('first')
+    assert json.loads(records[1]['content']) == {
+        'status': 'tool_budget_exhausted', 'executed': False,
+    }
 
 
 def test_iteration_budget(runtime):
     engine, agent, script, seen = runtime
     script(reply('', tc('record', text='evidence')))
-    assert engine.run_turn(agent, 'Work', max_iterations=1).status == 'exhausted'
+    result = engine.run_turn(agent, 'Work', max_iterations=1, max_total_tool_calls=1)
+    assert result.status == 'exhausted'
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize('report_kind', [
+    'plain', 'action', 'fenced_action', 'with_example', 'truncated', 'transport_failure',
+])
+def test_tool_budget_allows_one_report_without_additional_dispatch(runtime, report_kind):
+    engine, agent, script, seen = runtime
+    executed = []
+
+    class ObservedTool(RecordTool):
+        def _run(self, text: str) -> str:
+            executed.append(text)
+            return text
+
+    report = 'I read the configuration. Validation is still pending.'
+    envelope = '```json\n' + json.dumps({'tool_calls': [
+        {'name': 'finish_turn', 'arguments': {'message': 'Unobserved success.'}},
+    ]}) + '\n```'
+    answers = {
+        'plain': reply(report),
+        'action': reply(report, tc('record', text='must not run')),
+        'fenced_action': reply(envelope),
+        'with_example': reply(report + '\n\n' + envelope),
+        'truncated': reply(report, finish_reason='length'),
+        'transport_failure': TimeoutError('Budget report unavailable.'),
+    }
+    script(reply('', tc('record', text='configuration observed')), answers[report_kind])
+    result = engine.run_turn(agent, 'Work', task_tools=[ObservedTool()],
+                             max_total_tool_calls=1, max_iterations=2)
+
+    assert result.status == 'exhausted'
+    assert result.metrics['tool_calls'] == 1
+    assert len(seen) == 2
+    assert engine._last_turn_receipt['dispatches'] == 1
+    assert seen[1][1] is None
+    assert seen[1][2]['tool_choice'] == 'none'
+    assert seen[1][0][-2]['content'].startswith('configuration observed')
+    assert executed == ['configuration observed']
+    assert (report in result.message) is (report_kind in {'plain', 'with_example'})
+    assert (envelope in result.message) is (report_kind == 'with_example')
+    assert 'tool call limit' in result.message
 
 
 def test_cancellation_during_model_preempts_reply(runtime):
@@ -1134,7 +1186,7 @@ def test_cancellation_during_provider_call_does_not_publish_stale_body(runtime):
 
 def test_published_progress_survives_exhaustion_and_callback_cancellation(runtime):
     engine, agent, script, seen = runtime
-    script(reply('Public progress', tc('record', text='data')))
+    script(reply('Public progress', tc('record', text='data')), reply('Recorded data.'))
     delivered = []
     result = engine.run_turn(agent, 'Work', max_total_tool_calls=1,
                              on_public_message=delivered.append)

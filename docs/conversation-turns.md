@@ -27,6 +27,12 @@ and reports interruption. Host permissions, cancellation, and resource limits re
 authoritative. An end-instruction hook can continue once within the same cancellation
 scope and remaining model/tool budgets.
 
+When the tool limit stops an otherwise valid batch, the transcript marks any
+remaining calls as unexecuted. If a tool was dispatched and the model still
+has a request available, the principal can use one request with no tool
+schemas to report the observed results and remaining work. The turn still
+ends as `exhausted`, and that report adds no tool attempts.
+
 ## Rollout paths
 
 | Entry | Runtime contract |

@@ -63,6 +63,8 @@ from infinidev.tools.file.read_observation import (
 
 logger = logging.getLogger(__name__)
 
+_TOOL_LIMIT_MESSAGE = 'Conversation interrupted: tool call limit reached.'
+
 _PROTOCOL = """You own this conversation. Interpret the literal current user message using the
 provided context and available tools. Answer, ask a question, investigate, edit, or delegate
 as appropriate. A plain final response or finish_turn(message) returns control to the user;
@@ -345,6 +347,21 @@ def _protocol_payload(text: str) -> bool:
     return False
 
 
+def _budget_report_text(result: LLMCallResult) -> str:
+    if result.finish_reason not in {None, 'stop'} or result.tool_calls:
+        return ''
+    report = result.raw_content.strip()
+    candidate = report
+    fence, _, body = report.partition('\n')
+    if fence.casefold() in {'```', '```json'} and body.endswith('\n```'):
+        inner = body.removesuffix('\n```')
+        if '\n```' not in inner:
+            candidate = inner.strip()
+    if _protocol_payload(candidate) or candidate.startswith('[Tool:'):
+        return ''
+    return report
+
+
 def _manual_actions(content: str) -> list[ManualToolCall] | None:
     """Decode only a complete, visible manual action envelope."""
     text = content.strip()
@@ -411,11 +428,13 @@ def _call(
     *, tool_choice: str | dict[str, Any],
     named_choice_fallback: Literal['required', 'auto'],
 ) -> LLMCallResult:
-    schemas = None if ctx.manual_tc else ctx.tool_schemas
+    reporting_only = tool_choice == 'none'
+    schemas = None if ctx.manual_tc or reporting_only else ctx.tool_schemas
     recorder = current_recorder()
     if recorder is not None:
         recorder.request(ctx.recording_run_id, ctx.recording_iteration, messages,
-                         ctx.tool_schemas, mode='manual' if ctx.manual_tc else 'function_calling')
+                         [] if reporting_only else ctx.tool_schemas,
+                         mode='manual' if ctx.manual_tc else 'function_calling')
     measurement = [{k: v for k, v in message.items()
                     if k not in {'_recording_source', '_action_metadata'}}
                    for message in messages]
@@ -425,6 +444,7 @@ def _call(
                           if not key.startswith('_')} for message in messages]
     response = call_llm(ctx.llm_params, provider_messages, schemas, tool_choice=tool_choice,
         named_choice_fallback=named_choice_fallback,
+        retry_attempts=1 if reporting_only else None,
         use_json_mode=False,
         on_request_metadata=ctx.on_request_metadata,
         on_thinking_chunk=caller._on_thinking_chunk,
@@ -826,8 +846,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 verification_dirty = True
             if max_iterations and iterations >= max_iterations:
                 return outcome('exhausted', 'Conversation interrupted: model call limit reached.')
-            if max_calls and legacy_state.total_tool_calls >= max_calls:
-                return outcome('exhausted', 'Conversation interrupted: tool call limit reached.')
+            reporting_only = bool(max_calls and legacy_state.total_tool_calls >= max_calls)
+            if reporting_only and (invalid_batches or not receipt['dispatches']):
+                return outcome('exhausted', _TOOL_LIMIT_MESSAGE)
             if not context_repaired and ContextManager.under_context_pressure(
                 legacy_state.last_prompt_tokens, window,
             ):
@@ -850,7 +871,21 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             tool_choice: str | dict[str, Any] = (
                 post_tool_choice if legacy_state.total_tool_calls else 'auto'
             )
-            if readback_pending is not None:
+            if reporting_only:
+                tool_choice = 'none'
+                messages[0]['content'] += ('\n\nWhen the host requests a budget report, answer '
+                                          'in plain text without calling tools.')
+                notice = {'role': 'user', 'content':
+                          'Host: the tool call limit has been reached. Summarize the work and '
+                          'results already observed, including unfinished work. No tools are '
+                          'available for this report.'}
+                messages.append(notice)
+                if recorder is not None:
+                    recorder.attach(messages[0], recorder.source(
+                        'budget_report_system', 'system', messages[0]['content']))
+                    recorder.attach(notice, recorder.source(
+                        'tool_budget_report', 'user', notice['content']))
+            elif readback_pending is not None:
                 if (
                     not ctx.manual_tc
                     and (not max_iterations or iterations < max_iterations)
@@ -868,8 +903,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 readback_pending = None
             trace('runtime_request', mode='manual' if ctx.manual_tc else 'function_calling',
                   requested_tool_choice=tool_choice,
-                  finish_turn_offered=any(s['function']['name'] == 'finish_turn'
-                                         for s in ctx.tool_schemas),
+                  finish_turn_offered=not reporting_only and any(
+                      s['function']['name'] == 'finish_turn' for s in ctx.tool_schemas),
                   message_roles=[m['role'] for m in messages], reminder=unclosed_responses)
             ctx.on_request_metadata = lambda metadata: trace('provider_request', **metadata)
             usage_before = (legacy_state.total_prompt_tokens, legacy_state.total_completion_tokens)
@@ -880,6 +915,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             except Exception as exc:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
+                if reporting_only:
+                    trace('tool_budget_report_failed', error_type=type(exc).__name__)
+                    return outcome('exhausted', _TOOL_LIMIT_MESSAGE)
                 if is_context_window_rejection(exc):
                     if (
                         not context_repaired
@@ -914,6 +952,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                   calls=[{'id_sha256': hashlib.sha256(call.id.encode()).hexdigest(),
                           'tool': call.function.name}
                          for call in result.tool_calls or []])
+            if reporting_only:
+                report = ('' if engine._user_message_injector.has_pending
+                          else _budget_report_text(result))
+                return outcome('exhausted', _TOOL_LIMIT_MESSAGE + ('\n\n' + report if report else ''))
             from infinidev.engine.hooks.hooks import HookContext, HookEvent, hook_manager
             hook_manager.dispatch(HookContext(
                 event=HookEvent.POST_MODEL_MESSAGE,
@@ -1058,11 +1100,11 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             for call, args in validated:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
-                if max_calls and legacy_state.total_tool_calls >= max_calls:
-                    return outcome('exhausted', 'Conversation interrupted: tool call limit reached.')
                 reference = ''
                 attachments: list[Any] = []
-                if call.function.name == 'finish_turn' and engine._user_message_injector.has_pending:
+                if max_calls and legacy_state.total_tool_calls >= max_calls:
+                    body = json.dumps({'status': 'tool_budget_exhausted', 'executed': False})
+                elif call.function.name == 'finish_turn' and engine._user_message_injector.has_pending:
                     body = 'Turn close deferred because a new user message arrived. '
                     if close_deferred:
                         body += 'Accompanying assistant text was not published. '
