@@ -125,10 +125,11 @@ snapshots match. The executor omits this evidence for compound shell syntax.
 The dispatcher can normalize a leading literal `cd … &&` into `cwd`, which
 is checked against the workspace like any explicit `cwd`. The dispatcher
 classifies the command after pre-tool hooks and checks the original tool
-result. A later workspace change can add a host observation before the next
-request. The receipt and terminal show `current`, `stale`, or `unconfirmed`
-for the latest attempt. The receipt also records the time spent taking
-verification snapshots.
+result. The next request can include a short host notice for a stale or
+unconfirmed revision. The notice reflects the latest observation and clears
+after a successful repeat check. The receipt and terminal show `current`,
+`stale`, or `unconfirmed` for the latest attempt. The receipt also records
+the time spent taking verification snapshots.
 
 The principal saves a matched observation in the work checkpoint. It includes
 the archive locator when the displayed output matches the original result.

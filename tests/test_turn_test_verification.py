@@ -135,6 +135,7 @@ def test_verification_uses_executed_check_and_original_result(
         assert original_exit_codes == [1]
         content = next(message["content"] for message in seen[-1][0] if message["role"] == "tool")
         assert json.JSONDecoder().raw_decode(content)[0]["exit_code"] == 0
+        assert "current workspace revision is unconfirmed" in seen[-1][0][-1]["content"]
     state = get_session_runtime_state(tool_context.session_id)["ui_state"]["conversation"]
     observation = state.get("test_observation", {})
     assert bool(observation) == (expected == "current")
@@ -145,6 +146,7 @@ def test_verification_uses_executed_check_and_original_result(
     ("current", "current"),
     ("stale_same_batch", "stale"),
     ("rechecked", "current"),
+    ("failed_recheck", "unconfirmed"),
     ("failed", "unconfirmed"),
     ("conflicting", "unconfirmed"),
     ("no_launch_cwd", "unconfirmed"),
@@ -172,8 +174,9 @@ def test_test_receipt_tracks_the_observed_workspace(
             commands.append(command)
             if scenario == "cancelled":
                 engine.cancel()
+            failed = scenario == "failed" or (scenario == "failed_recheck" and len(commands) == 2)
             payload = {
-                "exit_code": 1 if scenario == "failed" else 0,
+                "exit_code": 1 if failed else 0,
                 "stdout": "check output", "launch_cwd": str(workspace_dir.resolve()),
             }
             if scenario == "conflicting":
@@ -202,10 +205,11 @@ def test_test_receipt_tracks_the_observed_workspace(
     edit = tc("edit_file", file_path=str(path), old_string="value = 1", new_string="value = 2")
     finish = reply("", tc("finish_turn", message="Done."))
     edit_first_batch = scenario in {
-        "stale_same_batch", "rechecked", "failed", "conflicting", "no_snapshot", "disabled",
+        "stale_same_batch", "rechecked", "failed_recheck", "failed", "conflicting", "no_snapshot",
+        "disabled",
     }
     calls = [reply("", check, edit) if edit_first_batch else reply("", check)]
-    if scenario == "rechecked":
+    if scenario in {"rechecked", "failed_recheck"}:
         calls.append(reply("", check))
     if scenario == "late_change":
         def finish_after_external_edit():
@@ -221,18 +225,18 @@ def test_test_receipt_tracks_the_observed_workspace(
 
     assert engine._last_turn_receipt.get("test_verification") == expected
     notices = [
-        message for messages, _, _ in seen for message in messages
-        if (message.get("content") or "").startswith("Host verification:")
+        [message["content"] for message in messages
+         if (message.get("content") or "").startswith("Host verification:")]
+        for messages, _, _ in seen
     ]
-    # A notice remains visible in subsequent requests. It enters the history once.
-    assert bool(notices) == (scenario in {"stale_same_batch", "rechecked"})
-    if notices:
-        assert "test command returned exit 0" in notices[0]["content"]
-        assert sum(
-            message.get("content") == notices[0]["content"]
-            for message in seen[-1][0]
-        ) == 1
-    assert commands == ["pytest -q"] * (2 if scenario == "rechecked" else 1)
+    assert all(len(current) <= 1 for current in notices)
+    if scenario in {"stale_same_batch", "rechecked", "failed_recheck"}:
+        assert "test command returned exit 0" in notices[1][0]
+    if scenario in {"failed", "conflicting", "no_launch_cwd", "no_snapshot", "failed_recheck"}:
+        assert "current workspace revision is unconfirmed" in notices[-1][0]
+    elif scenario != "stale_same_batch":
+        assert notices[-1] == []
+    assert commands == ["pytest -q"] * (2 if scenario in {"rechecked", "failed_recheck"} else 1)
     assert result.status == ("cancelled" if scenario == "cancelled" else "answered")
     if scenario in {"disabled", "cancelled", "no_snapshot"}:
         assert snapshot_count == (0 if scenario == "disabled" else 1)

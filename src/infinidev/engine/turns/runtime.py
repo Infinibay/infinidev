@@ -64,6 +64,11 @@ logger = logging.getLogger(__name__)
 
 _TOOL_LIMIT_MESSAGE = 'Conversation interrupted: tool call limit reached.'
 _OUTPUT_LIMIT_MESSAGE = 'Conversation interrupted: model output token limit reached.'
+_VERIFICATION_FEEDBACK = {
+    'stale': 'Host verification: the workspace changed after the last recognized test command '
+             'returned exit 0. The current revision still needs verification.',
+    'unconfirmed': 'Host verification: the current workspace revision is unconfirmed.',
+}
 
 _PROTOCOL = """You own this conversation. Interpret the literal current user message using the
 provided context and available tools. Answer, ask a question, investigate, edit, or delegate
@@ -850,6 +855,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         first_cutoff_revision: str | None = None
         workspace_effect_since_cutoff = False
         reported_archive_revisions: dict[str, str] = {}
+        prior_verification_status = verification.status if verification is not None else None
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
@@ -869,14 +875,6 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             if verification is not None and verification_dirty:
                 verification_dirty = False
                 if verification.refresh():
-                    notice = {'role': 'user', 'content':
-                        'Host verification: the workspace changed after the last recognized '
-                        'test command returned exit 0. '
-                        'Rerun the relevant check if authorized and needed for your report.'}
-                    messages.append(notice)
-                    if recorder is not None:
-                        recorder.attach(notice, recorder.source(
-                            'workspace_verification', 'user', notice['content']))
                     trace('test_verification_notice', status='stale')
             iterations += 1
             ctx.recording_iteration = iterations
@@ -913,16 +911,25 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         recorder.attach(notice, recorder.source(
                             'write_readback_context', 'user', notice['content']))
                 readback_pending = None
+            request_messages = messages
+            if verification is not None and (not verification.from_prior_turn
+                    or verification.status != prior_verification_status):
+                if notice_text := _VERIFICATION_FEEDBACK.get(verification.status):
+                    notice = {'role': 'user', 'content': notice_text}
+                    if recorder is not None:
+                        recorder.attach(notice, recorder.source(
+                            'workspace_verification', 'user', notice_text))
+                    request_messages = [*messages, notice]
             trace('runtime_request', mode='manual' if ctx.manual_tc else 'function_calling',
                   requested_tool_choice=tool_choice,
                   finish_turn_offered=not reporting_only and any(
                       s['function']['name'] == 'finish_turn' for s in ctx.tool_schemas),
-                  message_roles=[m['role'] for m in messages], reminder=unclosed_responses)
+                  message_roles=[m['role'] for m in request_messages], reminder=unclosed_responses)
             ctx.on_request_metadata = lambda metadata: trace('provider_request', **metadata)
             usage_before = (legacy_state.total_prompt_tokens, legacy_state.total_completion_tokens)
             call_started = time.monotonic()
             try:
-                result = _call(ctx, caller, messages, tool_choice=tool_choice,
+                result = _call(ctx, caller, request_messages, tool_choice=tool_choice,
                                named_choice_fallback=post_tool_choice)
             except Exception as exc:
                 if engine.is_cancelled:
