@@ -512,6 +512,15 @@ read at the first draft and two at the second. It rejected both drafts,
 published a failure status, and preserved the fixture. This probes the
 verification lifecycle using one historical draft and its live revision.
 
+A follow-up narrowed the revision to the principal's plan and close tools.
+An offline replay attempted to call the removed reader and received
+`tool_not_offered` before dispatch. In a live replay of the historical
+draft, the HTTP tool catalog excluded workspace tools and the cumulative
+read count stayed at one. Qwen called the built-in plan and close tools.
+The output still failed the stricter checker, which required the exact
+script from the reference fixture. The pipeline withheld both drafts.
+This checks the operation limit independently of artifact acceptance.
+
 ### What a task record means
 
 ```json

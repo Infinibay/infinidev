@@ -39,8 +39,10 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.context_recording import current_recorder, recorded_context
 from infinidev.engine.session_status import current_observer, observed_principal
-from infinidev.engine.turns.catalog import ToolGrant, freeze_task_tools
-from infinidev.engine.turns.models import DeliveryDraft
+from infinidev.engine.turns.catalog import (
+    ToolGrant, effective_tools, freeze_task_tools, select_tool_names,
+)
+from infinidev.engine.turns.models import DeliveryDraft, DeliveryRevision
 from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 logger = logging.getLogger(__name__)
@@ -869,7 +871,7 @@ def run_task(
     task_tools: Sequence[Any] | None = None,
     record_context_dir: str | os.PathLike[str] | None = None,
     tool_call_metadata: bool = False,
-    verify_delivery: Callable[[DeliveryDraft], str | None] | None = None,
+    verify_delivery: Callable[[DeliveryDraft], DeliveryRevision | str | None] | None = None,
     _hook_reentry: bool = False,
     _autonomous_budget: Any = None,
 ) -> str:
@@ -884,7 +886,8 @@ def run_task(
     are resolved from the agent's bound context.
 
     A principal SDK caller may verify a draft before publication. Return
-    None to accept it or nonempty feedback to request one budgeted revision.
+    None to accept it or feedback to request one budgeted revision. A
+    DeliveryRevision can restrict that revision to a subset of the tool grant.
 
     A turn is also the unit the user's ``task_start`` / ``task_end_*``
     hooks are scoped to (see ``engine/user_hooks/``). ``_hook_reentry`` is
@@ -1566,7 +1569,7 @@ def _run_principal_turn(
     workspace_path: str | None = None,
     tool_grant: ToolGrant | None = None,
     tool_call_metadata: bool = False,
-    verify_delivery: Callable[[DeliveryDraft], str | None] | None = None,
+    verify_delivery: Callable[[DeliveryDraft], DeliveryRevision | str | None] | None = None,
 ) -> str:
     """Close a conversational turn without creating or advancing work Tasks."""
     from infinidev.config.settings import settings
@@ -1637,6 +1640,9 @@ def _run_principal_turn(
             selected = {}
             if tool_call_metadata:
                 selected['tool_call_metadata'] = True
+            if verify_delivery is not None and tool_grant is None:
+                catalog = effective_tools(getattr(agent, 'tools', []) or [])
+                tool_grant = freeze_task_tools(catalog, catalog)
             if tool_grant is not None:
                 tool_grant.validate()
                 selected['task_tools'] = list(tool_grant.tools)
@@ -1672,7 +1678,7 @@ def _run_principal_turn(
                     MappingProxyType(dict(dispatched_tools)),
                 )
                 try:
-                    feedback = verify_delivery(draft)
+                    verdict = verify_delivery(draft)
                 except Exception as exc:
                     logger.warning("Delivery verifier raised %s", type(exc).__name__)
                     status, result = "failed", "Conversation failed: delivery verification failed."
@@ -1680,7 +1686,8 @@ def _run_principal_turn(
                 if getattr(engine, "is_cancelled", False):
                     status, result = "cancelled", "Conversation cancelled."
                     break
-                if feedback is None:
+                feedback = verdict.feedback if isinstance(verdict, DeliveryRevision) else verdict
+                if verdict is None:
                     for part in draft.public_messages:
                         publish(part)
                     result = draft.message
@@ -1692,6 +1699,18 @@ def _run_principal_turn(
                     status = "failed"
                     result = "Conversation failed: the revised delivery did not pass verification."
                     break
+                elif isinstance(verdict, DeliveryRevision):
+                    assert tool_grant is not None
+                    try:
+                        tool_grant.validate()
+                        chosen = select_tool_names(tool_grant, verdict.tool_names)
+                        tool_grant = freeze_task_tools(tool_grant, chosen)
+                    except (TypeError, ValueError):
+                        status = "failed"
+                        result = (
+                            "Conversation failed: delivery verifier returned an invalid revision tool grant."
+                        )
+                        break
             elif verify_delivery is not None and status == "exhausted":
                 # A budget report may contain model-authored delivery text.
                 result = "Conversation exhausted its budget before delivery verification."

@@ -86,6 +86,12 @@ independently of claims in the draft.
 
 Return `None` to accept the draft. Return a nonempty diagnostic to
 request one revision with the original tool grant and remaining budget.
+Return `DeliveryRevision(feedback, tool_names)` from
+`infinidev.engine.turns.models` to choose a subset of the original tools
+for that revision. An empty tuple leaves only the principal's built-in
+plan and close tools. Unknown, ungranted or duplicate names cause a
+verification failure.
+
 The verifier checks the revised draft before publication. Rejection of
 the revision, verifier failure, or budget exhaustion produces a status
 message. File changes already made by the turn remain available for

@@ -181,6 +181,41 @@ def test_delivery_verifier_cannot_be_bypassed_by_a_budget_report(boundary):
     hooks.notify.assert_called_once_with("Infinidev", result, "agent")
 
 
+@pytest.mark.parametrize("explicit_grant,tool_names", [
+    (False, ()), (True, ()), (False, ("read_file",)),
+])
+def test_delivery_revision_can_narrow_workspace_tools(boundary, explicit_grant, tool_names):
+    from infinidev.engine.turns.models import DeliveryRevision
+
+    agent, engine, _ = boundary
+    read = SimpleNamespace(name="read_file")
+    agent.tools = [read, SimpleNamespace(name="edit_file")]
+    verify = Mock(side_effect=[DeliveryRevision("Correct the example.", tool_names), None])
+    selected = {"task_tools": [read]} if explicit_grant else {}
+
+    assert call(boundary, verify_delivery=verify, **selected) == "respuesta"
+    first, revision = engine.run_turn.call_args_list
+    assert first.kwargs["task_tools"] == ([read] if explicit_grant else agent.tools)
+    assert revision.kwargs["task_tools"] == ([read] if tool_names else [])
+    assert revision.kwargs["max_iterations"] == 8
+    assert revision.kwargs["max_total_tool_calls"] == 17
+
+
+@pytest.mark.parametrize("tool_names", [("edit_file",), ("read_file", "read_file")])
+def test_delivery_revision_cannot_expand_or_duplicate_the_original_grant(boundary, tool_names):
+    from infinidev.engine.turns.models import DeliveryRevision
+
+    agent, engine, hooks = boundary
+    read = SimpleNamespace(name="read_file")
+    agent.tools = [read, SimpleNamespace(name="edit_file")]
+    verify = Mock(return_value=DeliveryRevision("Correct the example.", tool_names))
+
+    result = call(boundary, task_tools=[read], verify_delivery=verify)
+    assert "invalid revision tool grant" in result
+    assert verify.call_count == engine.run_turn.call_count == 1
+    hooks.notify.assert_called_once_with("Infinidev", result, "agent")
+
+
 @pytest.mark.parametrize("bad", [None, "Done", SimpleNamespace(status="completed", message="ok"),
                                   TurnResult(message="", status="answered", state=TurnState())])
 def test_invalid_result_fails_closed(boundary, monkeypatch, bad):

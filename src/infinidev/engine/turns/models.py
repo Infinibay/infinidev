@@ -86,6 +86,14 @@ class DeliveryDraft:
     dispatched_tools: Mapping[str, int]
 
 
+@dataclass(frozen=True)
+class DeliveryRevision:
+    """Verifier feedback with an explicit subset of the original tool grant."""
+
+    feedback: str
+    tool_names: tuple[str, ...]
+
+
 class TurnResult(BaseModel):
     """A conversation outcome, independent of work Task lifecycle."""
 
