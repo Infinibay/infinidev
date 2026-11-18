@@ -130,6 +130,10 @@ to recover the original result. The host compares filesystem change
 metadata from the read and the next turn. A replacement with identical bytes
 or a change outside the returned lines can also set `changed`. Absent status
 provides no freshness guarantee, including for older archives and pod reads.
+An exact recall of a retained file reference also checks current metadata
+after the tool batch. The notice follows the complete batch and the exact
+page still contains the original result. Repeated pages of the same reference
+share a notice while the reported revision status stays the same.
 
 ## Action channels and continuity
 

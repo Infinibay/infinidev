@@ -284,6 +284,22 @@ def _file_revision_status(
     return 'changed' if current != source.file_fingerprint else None
 
 
+def _recalled_file_source(
+    sources: dict[str, EvidenceSource], reference: str, body: str,
+) -> EvidenceSource | None:
+    source = (sources.get(f'[Archived evidence; recall_context reference: {reference}]')
+              or sources.get(f'[Archived evidence; reference: {reference}]'))
+    if source is None or not source.file_fingerprint:
+        return None
+    try:
+        page = json.loads(body)
+    except ValueError:
+        return None
+    if isinstance(page, dict) and page.get('status') == 'ok' and page.get('reference') == reference:
+        return source
+    return None
+
+
 def _user_content(text: str, attachments: list[Any] | None, vision: bool) -> Any:
     if not attachments:
         return text
@@ -786,6 +802,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
               baseline_available=tracker.baseline is not None,
               baseline_files=len(tracker.baseline.files) if tracker.baseline else 0)
         context_repaired = False
+        reported_archive_revisions: dict[str, str] = {}
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
@@ -1006,6 +1023,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     action['_action_metadata'] = declared
             messages.append(action)
             pending_images = []
+            recalled_files: dict[str, EvidenceSource] = {}
             for call, args in validated:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
@@ -1072,9 +1090,12 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         engine._finish_tool_batch()
                     # Exact pages already identify their durable source. Re-archiving and
                     # appending a footer would invalidate the complete JSON response/budget.
-                    exact_recall = (call.function.name == 'recall_context'
-                                    and args.get('reference') is not None)
-                    reference = '' if exact_recall else _archive(
+                    recalled_ref = args.get('reference') if call.function.name == 'recall_context' else None
+                    if isinstance(recalled_ref, str):
+                        source = _recalled_file_source(state.evidence_sources, recalled_ref, body)
+                        if source is not None:
+                            recalled_files[recalled_ref] = source
+                    reference = '' if recalled_ref is not None else _archive(
                         ctx, iterations, call.function.name, args, body)
                     if reference:
                         if call.function.name not in {'finish_turn', 'update_plan'}:
@@ -1108,6 +1129,22 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         receipt['closure'] = 'finish_turn'
                         return outcome('answered', state.reply or '')
             messages.extend(pending_images)
+            revision_notices = []
+            for recalled_ref, source in recalled_files.items():
+                status = _file_revision_status(source, workspace_path)
+                if status is not None and reported_archive_revisions.get(recalled_ref) != status:
+                    reported_archive_revisions[recalled_ref] = status
+                    revision_notices.append({'reference': recalled_ref,
+                                             'requested_path': source.requested_path,
+                                             'file_revision_status': status})
+            if revision_notices:
+                revision_json = json.dumps(revision_notices, ensure_ascii=False).replace('<', r'\u003c')
+                notice = {'role': 'user', 'content':
+                    '<archive_revision_context>\n' + revision_json + '\n</archive_revision_context>'}
+                messages.append(notice)
+                if recorder is not None:
+                    recorder.attach(notice, recorder.source(
+                        'archive_revision_context', 'user', notice['content']))
     except Exception as exc:
         logger.exception('Conversation runtime failed')
         return outcome('cancelled' if engine.is_cancelled else 'failed',

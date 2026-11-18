@@ -295,7 +295,50 @@ def test_context_rejection_recovers_archived_read_without_dispatching_it_again(
     assert turn.metrics["observed_iterations"] == 4
     assert engine._last_turn_receipt["dispatches"] == 2
     page = observation(seen[-1][0], "recall_context")
-    assert json.loads(page)["content"] == final_line
+    recalled = json.loads(page)
+    assert recalled["content"] == final_line
+    notice = seen[-1][0][-1]
+    assert notice["role"] == "user"
+    assert notice["content"].startswith("<archive_revision_context>\n")
+    assert json.loads(notice["content"].splitlines()[1]) == [{
+        "reference": recalled["reference"], "requested_path": "evidence.txt",
+        "file_revision_status": "changed",
+    }]
+
+
+def test_archive_revision_notice_follows_all_native_tool_results(runtime, auto_approve_permissions):
+    from infinidev.tools.file.edit_file_tool import EditFileTool
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    engine, agent, script, seen = runtime
+    reference = None
+
+    def recall_and_edit():
+        nonlocal reference
+        result = next(m["content"] for m in seen[-1][0] if m["role"] == "tool")
+        reference = result.split("recall_context reference: ", 1)[1].removesuffix("]")
+        return reply("", tc("recall_context", reference=reference), tc(
+            "edit_file", file_path="sample.txt", old_string="line one", new_string="changed",
+        ))
+
+    def recall_second_page():
+        recall, edit, notice = seen[-1][0][-3:]
+        assert [recall["role"], edit["role"], notice["role"]] == ["tool", "tool", "user"]
+        assert "line one" in json.loads(recall["content"])["content"]
+        assert json.loads(notice["content"].splitlines()[1]) == [{
+            "reference": reference, "requested_path": "sample.txt", "file_revision_status": "changed",
+        }]
+        return reply("", tc("recall_context", reference=reference, start=2))
+
+    script(reply("", tc("read_file", file_path="sample.txt")), recall_and_edit,
+           recall_second_page, reply("", tc("finish_turn", message="Done.")))
+    result = engine.run_turn(agent, "Compare archived and current readings.", task_tools=[
+        ReadFileTool(), RecallContextTool(), EditFileTool(),
+    ])
+
+    assert result.status == "answered"
+    assert sum((m.get("content") or "").startswith("<archive_revision_context>")
+               for m in seen[-1][0]) == 1
 
 
 @pytest.mark.parametrize(("recall_granted", "limit", "requests"), [
