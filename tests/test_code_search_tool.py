@@ -6,7 +6,10 @@ import json
 
 import pytest
 
+from infinidev.engine.subprocess_runner import run_captured
+from infinidev.tools.base.context import set_context
 from infinidev.tools.file.code_search_tool import CodeSearchTool
+from infinidev.tools.file.read_file_tool import ReadFileTool
 
 
 def test_max_depth_search_uses_safe_shell_quoting(bound_tool, workspace_dir) -> None:
@@ -43,6 +46,34 @@ def test_max_depth_search_returns_matches(bound_tool, workspace_dir) -> None:
 
     assert result["match_count"] == 1
     assert result["matches"][0]["file"].endswith("nested/source.py")
+
+
+@pytest.mark.parametrize("backend", ["git", "git-parent", "grep-depth", "grep"])
+def test_subdirectory_hit_can_be_passed_directly_to_read_file(
+    bound_tool, workspace_dir, backend,
+) -> None:
+    workspace = workspace_dir
+    if backend == "git-parent":
+        workspace = workspace_dir / "workspace"
+        workspace.mkdir()
+        set_context(workspace_path=str(workspace))
+    if backend in {"git", "git-parent"}:
+        assert run_captured(["git", "init", "-q"], cwd=str(workspace_dir), timeout=5).exit_code == 0
+    package = workspace / "pkg"
+    package.mkdir()
+    (package / "scheduler.py").write_text("def max_pending_jobs():\n    return 37\n")
+    (workspace / "scheduler.py").write_text("def max_pending_jobs():\n    return 2\n")
+
+    result = json.loads(bound_tool(CodeSearchTool)._run(
+        pattern="def max_pending_jobs", file_path="pkg", context_lines=1,
+        max_depth=2 if backend == "grep-depth" else None,
+    ))
+
+    assert result.get("match_count") == 1, result
+    match = result["matches"][0]
+    assert match["context"][-1]["content"] == "    return 37"
+    read = bound_tool(ReadFileTool)._run(file_path=match["file"])
+    assert read.splitlines()[-1].endswith("    return 37"), (match["file"], read)
 
 
 def test_search_accepts_a_single_file_path(bound_tool, workspace_dir) -> None:
@@ -93,7 +124,6 @@ def test_single_file_more_than_limit_is_truncated(bound_tool, workspace_dir) -> 
 def test_directory_context_preserves_real_backend_rows(
     bound_tool, workspace_dir, git_backend, filename,
 ):
-    from infinidev.engine.subprocess_runner import run_captured
     if git_backend:
         assert run_captured(["git", "init", "-q"], cwd=str(workspace_dir), timeout=5).exit_code == 0
     source = workspace_dir / filename
@@ -126,7 +156,6 @@ def test_directory_context_does_not_consume_match_limit(bound_tool, workspace_di
 
 @pytest.mark.parametrize("git_backend", [False, True])
 def test_directory_overlapping_context_is_not_a_hit(bound_tool, workspace_dir, git_backend):
-    from infinidev.engine.subprocess_runner import run_captured
     if git_backend:
         assert run_captured(["git", "init", "-q"], cwd=str(workspace_dir), timeout=5).exit_code == 0
     (workspace_dir / "source.rs").write_text("before\nneedle one\nbetween\nneedle two\nafter\n")
@@ -141,7 +170,6 @@ def test_directory_overlapping_context_is_not_a_hit(bound_tool, workspace_dir, g
 @pytest.mark.parametrize("git_backend", [False, True])
 @pytest.mark.parametrize("separator", ["\v", "\f", "\u0085", "\u2028"])
 def test_directory_non_lf_content_is_preserved(bound_tool, workspace_dir, git_backend, separator):
-    from infinidev.engine.subprocess_runner import run_captured
     if git_backend:
         assert run_captured(["git", "init", "-q"], cwd=str(workspace_dir), timeout=5).exit_code == 0
     content = "prefix" + separator + "needle"

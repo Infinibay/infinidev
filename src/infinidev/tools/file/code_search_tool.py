@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+from pathlib import Path
 from typing import Any, Type
 
 from pydantic import BaseModel, Field
@@ -304,6 +305,13 @@ class CodeSearchTool(InfinibayBaseTool):
         if result.exit_code not in (0, 1):
             return self._error(f"Search failed: {result.stderr.strip()}")
 
+        # Git grep and find emit paths relative to their search cwd.
+        # File tools interpret relative paths from the agent's workspace.
+        match_base = Path(file_path)
+        workspace = Path(self._resolve_path("."))
+        if match_base.is_relative_to(workspace):
+            match_base = match_base.relative_to(workspace)
+
         matches = []
         context_by_file: dict[str, dict[int, str]] = {}
         hit_count = 0
@@ -319,6 +327,7 @@ class CodeSearchTool(InfinibayBaseTool):
                 unparsed += 1
                 continue
             filename, number, content, matched = record
+            filename = str(match_base / filename)
             if context_lines:
                 context_by_file.setdefault(filename, {})[number] = content
             if matched:

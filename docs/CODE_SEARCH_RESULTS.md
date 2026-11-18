@@ -104,3 +104,22 @@ Tests run real GNU grep/Git locally and assert the portable argv contract; they 
 not claim a macOS runtime test. Output records split on LF only, preserving VT,
 FF, NEL and Unicode line-separator characters inside source content. Existing
 subprocess text-mode CR/LF normalization is outside this parser correction.
+
+## Paths for follow-up reads
+
+A local directory hit's `file` can be passed directly as `read_file.file_path`.
+Git and depth-limited grep can emit names relative to the searched directory.
+Infinidev rebases those names to the agent workspace, including when the
+workspace is nested inside the Git repository. For searches outside the
+workspace, relative backend names become absolute. Absolute backend paths,
+direct-file searches and pod helper results keep their existing behavior.
+
+Regression tests search a package containing a file whose basename also
+exists at the workspace root, then pass the returned path directly to
+`read_file` and check the package's content.
+
+In two exploratory Qwen pairs on local Git fixtures, the first scoped search
+returned a workspace-relative path in both fixed trials and a
+search-directory-relative path in both controls. None of the four trials
+dispatched `read_file` or delivered the requested diagnosis. The automated
+regression verifies the handoff when a read takes place.
