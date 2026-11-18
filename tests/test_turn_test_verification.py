@@ -108,3 +108,60 @@ def test_test_receipt_tracks_the_observed_workspace(
     assert result.status == ("cancelled" if scenario == "cancelled" else "answered")
     if scenario in {"disabled", "cancelled", "no_snapshot"}:
         assert snapshot_count == (0 if scenario == "disabled" else 1)
+
+
+@pytest.mark.parametrize(("comparison", "recall_granted", "expected"), [
+    ("unchanged", True, "current"),
+    ("edited", True, "stale"),
+    ("unavailable", True, "unconfirmed"),
+    ("unchanged", False, "current"),
+])
+def test_followup_revalidates_checkpointed_test_result(
+    comparison, recall_granted, expected, runtime, monkeypatch, workspace_dir, tool_context,
+):
+    from infinidev.db.service import get_session_runtime_state
+    from infinidev.tools.meta.recall_context_tool import RecallContextTool
+
+    engine, agent, script, seen = runtime
+    monkeypatch.setattr(settings, "TASK_TEST_REVISION_FEEDBACK_ENABLED", True)
+    target = workspace_dir / "checked.py"
+    target.write_text("value = 1\n")
+
+    class CommandTool(BaseTool):
+        name: str = "execute_command"
+        description: str = "Return the scripted exit status."
+        args_schema: type[BaseModel] = CommandInput
+
+        def _run(self, command: str) -> str:
+            return '{"exit_code": 0, "stdout": "observed output"}'
+
+    def close_first_turn():
+        saved = get_session_runtime_state(tool_context.session_id)["ui_state"]["conversation"]
+        assert saved["receipt"]["closure"] == "unclosed"
+        assert saved["test_observation"]["locator"] in saved["evidence"]
+        return reply("", tc("finish_turn", message="Check executed."))
+
+    script(reply("", tc("execute_command", command="pytest -q")), close_first_turn)
+    assert engine.run_turn(agent, "Run the check.",
+                           task_tools=[CommandTool(), RecallContextTool()]).status == "answered"
+    if comparison == "edited":
+        target.write_text("value = 2\n")
+    if comparison == "unavailable":
+        monkeypatch.setattr(turn_runtime.FileChangeTracker, "workspace_revision", lambda _: None)
+    engine.begin_turn()
+    script(reply("Reviewed the recorded observation."))
+    tools = [RecallContextTool()] if recall_granted else []
+    assert engine.run_turn(agent, "Do I need another check?", task_tools=tools).status == "answered"
+
+    prior = next(m["content"] for m in seen[-1][0] if
+                 m["content"].startswith("<prior_state_context>"))
+    evidence = json.loads(prior.splitlines()[1])["previous_test_observation"]
+    assert evidence["revision_status"] == expected
+    assert evidence["recognized_test_command_exit_code"] == 0
+    if recall_granted:
+        assert "recall_context reference: wm-archive:" in evidence["locator"]
+    else:
+        assert "locator" not in evidence
+    assert engine._last_turn_receipt["test_verification_origin"] == "prior_turn"
+    saved = get_session_runtime_state(tool_context.session_id)["ui_state"]["conversation"]
+    assert ("test_observation" in saved) is (expected == "current")

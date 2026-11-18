@@ -1721,7 +1721,8 @@ def _run_principal_turn(
             f"workspace changed: {bool(_turn_changed_files(engine))}; "
             f"closure: {receipt['closure']}; trace: {receipt['run_id']}.")
         if test_revision is not None:
-            hooks.on_status('info', f"Host test result revision: {test_revision}.")
+            origin = " (prior turn)" if receipt.get("test_verification_origin") == "prior_turn" else ""
+            hooks.on_status('info', f"Host test result revision: {test_revision}{origin}.")
     if status != "answered":
         hooks.on_status("error" if status == "failed" else "warn",
                         f"Conversation status: {status}.")

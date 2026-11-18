@@ -49,6 +49,13 @@ class PreviousCheckpoint(BaseModel):
     dispatches: int = Field(ge=0, strict=True)
 
 
+class TestObservation(BaseModel):
+    """A zero exit associated with a measured workspace revision."""
+
+    revision: str = Field(strict=True, pattern=r"^[0-9a-f]{64}$")
+    locator: str | None = Field(default=None, strict=True, max_length=500)
+
+
 class TurnState(BaseModel):
     """Retained context with transient conversational termination state."""
 
@@ -58,6 +65,7 @@ class TurnState(BaseModel):
     previous_interruption: PreviousInterruption | None = Field(default=None, exclude=True)
     previous_checkpoint: PreviousCheckpoint | None = Field(default=None, exclude=True)
     previous_run_id: str | None = Field(default=None, exclude=True)
+    previous_test_observation: TestObservation | None = Field(default=None, exclude=True)
     finished: bool = Field(default=False, exclude=True)
     reply: str | None = Field(default=None, exclude=True)
 

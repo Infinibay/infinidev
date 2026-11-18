@@ -45,7 +45,8 @@ from infinidev.engine.turns.context_recovery import (
     is_context_window_rejection, shorten_archived_results,
 )
 from infinidev.engine.turns.models import (
-    EvidenceSource, PreviousCheckpoint, PreviousInterruption, TurnResult, TurnState,
+    EvidenceSource, PreviousCheckpoint, PreviousInterruption, TestObservation, TurnResult,
+    TurnState,
 )
 from infinidev.engine.turns.tools import build_turn_tools
 from infinidev.engine.turns.verification import TurnTestVerification, may_change_workspace
@@ -190,6 +191,7 @@ def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
         state = TurnState.model_validate({
             **data, 'evidence_sources': {}, 'previous_interruption': None,
             'previous_checkpoint': None, 'previous_run_id': previous_run_id,
+            'previous_test_observation': None,
         })
         try:
             if receipt.get('closure') == 'interrupted':
@@ -198,6 +200,11 @@ def _load_state(session_id: str) -> tuple[TurnState, list[str]]:
                 state.previous_checkpoint = PreviousCheckpoint.model_validate(receipt)
         except ValidationError:
             pass  # Older receipts do not record a terminal status.
+        if isinstance(observation := data.get('test_observation'), dict):
+            try:
+                state.previous_test_observation = TestObservation.model_validate(observation)
+            except ValidationError:
+                pass
         sources = data.get('evidence_sources')
         if isinstance(sources, dict):
             for ref in references:
@@ -573,11 +580,18 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
     def persist_work(*, checkpoint: bool = False) -> None:
         saved_receipt = {**receipt, 'closure': 'unclosed'} if checkpoint else receipt
         try:
+            saved = {
+                **_bounded_state(state), 'evidence': references[-40:], 'receipt': saved_receipt,
+                'evidence_sources': {ref: source.model_dump(exclude_none=True)
+                                     for ref, source in state.evidence_sources.items()},
+            }
+            if (
+                verification is not None and verification.observation is not None
+                and not engine.is_cancelled
+            ):
+                saved['test_observation'] = verification.observation.model_dump(exclude_none=True)
             _persist_session_runtime_field(session_id, 'conversation',
-                {**_bounded_state(state), 'evidence': references[-40:], 'receipt': saved_receipt,
-                 'evidence_sources': {ref: source.model_dump(exclude_none=True)
-                                      for ref, source in state.evidence_sources.items()}},
-                replace_if=owns_work_snapshot)
+                saved, replace_if=owns_work_snapshot)
         except Exception:
             logger.warning('Conversation state persistence failed', exc_info=True)
 
@@ -593,6 +607,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             else:
                 verification.refresh()
                 receipt['test_verification'] = verification.status
+            if verification.from_prior_turn:
+                receipt['test_verification_origin'] = 'prior_turn'
             receipt['test_revision_snapshot_ms'] = verification.snapshot_ns // 1_000_000
         engine._last_state = legacy_state
         engine._last_status = status
@@ -655,6 +671,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         engine._last_file_tracker = tracker
         if settings.TASK_TEST_REVISION_FEEDBACK_ENABLED:
             verification = TurnTestVerification(tracker)
+            if state.previous_test_observation is not None:
+                verification.restore(state.previous_test_observation)
         set_loop_state(agent.agent_id, legacy_state)
         set_file_tracker(agent.agent_id, tracker)
         ctx = SimpleNamespace(agent=agent, agent_id=agent.agent_id, project_id=agent.project_id,
@@ -695,6 +713,15 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             prior['previous_interruption'] = state.previous_interruption.model_dump()
         if state.previous_checkpoint is not None:
             prior['previous_checkpoint'] = state.previous_checkpoint.model_dump()
+        if verification is not None and verification.from_prior_turn:
+            prior_observation = {
+                'revision_status': verification.status,
+                'recognized_test_command_exit_code': 0,
+            }
+            locator = state.previous_test_observation.locator
+            if locator and 'recall_context' in ctx.tool_dispatch:
+                prior_observation['locator'] = _reference_for_tools(locator, ctx.tool_dispatch)
+            prior['previous_test_observation'] = prior_observation
         if references or any(prior.values()):
             evidence = []
             for ref in references:
@@ -1021,6 +1048,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         if call.function.name not in {'finish_turn', 'update_plan'}:
                             retain_evidence(reference, _evidence_source(
                                 call.function.name, args, workspace_path))
+                    if test_attempt and verification.observation is not None:
+                        verification.observation.locator = reference or None
                     if workspace_effect or state.plan is not previous_plan:
                         persist_work(checkpoint=True)
                 archive_metadata = {'_archive_reference': reference, '_archive_characters': len(body)}

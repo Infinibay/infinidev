@@ -9,6 +9,7 @@ from typing import Literal
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.guidance.test_runners import annotate_test_result_payload
+from infinidev.engine.turns.models import TestObservation
 from infinidev.tools.base.tool_effects import ToolEffects, local_effects_for_name
 
 
@@ -20,11 +21,12 @@ def may_change_workspace(name: str, effects: ToolEffects | None) -> bool:
 
 
 class TurnTestVerification:
-    """Retain the latest observed test status within one invocation."""
+    """Track the latest check and revalidate a saved observation when resuming."""
 
     def __init__(self, tracker: FileChangeTracker) -> None:
         self._tracker = tracker
-        self._tested_revision: str | None = None
+        self.observation: TestObservation | None = None
+        self.from_prior_turn = False
         self.status: Literal["current", "stale", "unconfirmed"] | None = None
         self.snapshot_ns = 0
 
@@ -38,7 +40,8 @@ class TurnTestVerification:
             self.snapshot_ns += time.monotonic_ns() - started
 
     def observe_test(self, revision_before: str | None, result: str) -> None:
-        self._tested_revision = None
+        self.observation = None
+        self.from_prior_turn = False
         self.status = "unconfirmed"
         if revision_before is None:
             return
@@ -56,16 +59,23 @@ class TurnTestVerification:
         ):
             return
         if self.snapshot() == revision_before:
-            self._tested_revision = revision_before
+            self.observation = TestObservation(revision=revision_before)
             self.status = "current"
+
+    def restore(self, observation: TestObservation) -> None:
+        """Revalidate the saved observation before presenting it to the model."""
+        self.observation = observation
+        self.from_prior_turn = True
+        self.status = "current"
+        self.refresh()
 
     def refresh(self) -> bool:
         """Check a current result and report whether it just became stale."""
-        if self._tested_revision is None:
+        if self.observation is None:
             return False
         revision = self.snapshot()
-        if revision == self._tested_revision:
+        if revision == self.observation.revision:
             return False
-        self._tested_revision = None
+        self.observation = None
         self.status = "stale" if revision is not None else "unconfirmed"
         return self.status == "stale"

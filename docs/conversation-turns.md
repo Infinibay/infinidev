@@ -98,12 +98,18 @@ If optional readback requests a named tool and the endpoint rejects that
 selector, its fallback honors the configured choice and provider capabilities.
 
 Set `INFINIDEV_TASK_TEST_REVISION_FEEDBACK_ENABLED=true` to observe test
-revisions within the principal turn. A recognised test command with an
+revisions in the principal engine. A recognised test command with an
 unambiguous zero exit is associated with the observed workspace when its
 before and after snapshots match. A later workspace change can add a
 host observation before the next request. The receipt and terminal show
 `current`, `stale`, or `unconfirmed` for the latest attempt. The receipt
 also records the time spent taking verification snapshots.
+
+The principal saves a matched observation and its available archive locator
+in the work checkpoint. At the next turn it compares the saved revision
+against a fresh workspace snapshot. Results from earlier turns are marked
+as such in the host receipt. A changed or unavailable revision clears the
+saved match. The model receives the archive locator when recall is granted.
 
 The option is off by default. The model chooses whether to run another
 authorised check, and `finish_turn` remains available. The status describes
