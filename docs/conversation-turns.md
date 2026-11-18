@@ -36,7 +36,11 @@ ends as `exhausted`, and that report adds no tool attempts.
 A response cut off by the provider output limit is discarded before dispatch
 or public delivery. With model requests left, the principal can try once more
 in the same turn and request a shorter answer or a smaller complete tool call.
-A second cutoff ends the turn as `exhausted` with prior evidence retained.
+One additional retry is available if a workspace-capable tool dispatched
+between cutoffs and the host observes a different workspace revision. The
+turn otherwise ends as `exhausted` with prior evidence retained. Both retries
+use the existing model request and output limits. Workspace revision checks
+use bounded hashing and may fall back to file metadata for large files.
 
 ## Rollout paths
 

@@ -19,6 +19,7 @@ from infinidev.config.model_capabilities import get_model_capabilities
 from infinidev.config.secrets import redact
 from infinidev.config.settings import settings
 from infinidev.db.service import _persist_session_runtime_field, get_session_runtime_state
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.behavior.reasoning_content import extract_reasoning, reasoning_history_fields
 from infinidev.engine.context_recording import current_recorder
 from infinidev.engine.engine_logging import emit_loop_event
@@ -64,6 +65,7 @@ from infinidev.tools.file.read_observation import (
 logger = logging.getLogger(__name__)
 
 _TOOL_LIMIT_MESSAGE = 'Conversation interrupted: tool call limit reached.'
+_OUTPUT_LIMIT_MESSAGE = 'Conversation interrupted: model output token limit reached.'
 
 _PROTOCOL = """You own this conversation. Interpret the literal current user message using the
 provided context and available tools. Answer, ask a question, investigate, edit, or delegate
@@ -292,6 +294,12 @@ def _file_revision_status(
     if revision is None:
         return 'unavailable'
     return 'changed' if revision[1] != source.file_fingerprint else None
+
+
+def _output_recovery_revision(tracker: FileChangeTracker) -> str | None:
+    with best_effort('output recovery workspace snapshot unavailable'):
+        return tracker.workspace_revision()
+    return None
 
 
 def _recalled_file_source(
@@ -837,7 +845,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
               baseline_available=tracker.baseline is not None,
               baseline_files=len(tracker.baseline.files) if tracker.baseline else 0)
         context_repaired = False
-        output_limit_retried = False
+        output_retries = 0
+        first_cutoff_revision: str | None = None
+        workspace_effect_since_cutoff = False
         reported_archive_revisions: dict[str, str] = {}
         while True:
             if engine.is_cancelled:
@@ -960,20 +970,30 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                           else _budget_report_text(result))
                 return outcome('exhausted', _TOOL_LIMIT_MESSAGE + ('\n\n' + report if report else ''))
             if output_truncated:
-                if output_limit_retried or (max_iterations and iterations >= max_iterations):
-                    return outcome('exhausted',
-                        'Conversation interrupted: model output token limit reached.')
-                output_limit_retried = True
-                notice = {'role': 'user', 'content':
-                          'Host: the previous response hit the model output limit and was '
-                          'discarded. No action from that response ran. Keep the next response '
-                          'short. If a tool is needed, send one complete call with fewer arguments '
-                          'or a smaller edit.'}
+                if output_retries >= 2 or (max_iterations and iterations >= max_iterations):
+                    return outcome('exhausted', _OUTPUT_LIMIT_MESSAGE)
+                if output_retries == 0:
+                    first_cutoff_revision = _output_recovery_revision(tracker)
+                else:
+                    if not workspace_effect_since_cutoff or first_cutoff_revision is None:
+                        return outcome('exhausted', _OUTPUT_LIMIT_MESSAGE)
+                    revision = _output_recovery_revision(tracker)
+                    if revision is None or revision == first_cutoff_revision:
+                        return outcome('exhausted', _OUTPUT_LIMIT_MESSAGE)
+                output_retries += 1
+                guidance = ('Host: the previous response hit the model output limit and was '
+                            'discarded. No action from that response ran. Keep the next response '
+                            'short. If a tool is needed, send one complete call with fewer '
+                            'arguments or a smaller edit.')
+                if output_retries == 2:
+                    guidance += (' If the work is ready to report, call finish_turn by itself '
+                                 'with a brief account of the results already observed.')
+                notice = {'role': 'user', 'content': guidance}
                 messages.append(notice)
                 if recorder is not None:
                     recorder.attach(notice, recorder.source(
                         'output_limit_recovery', 'user', notice['content']))
-                trace('output_limit_recovery', reason='length')
+                trace('output_limit_recovery', reason='length', retry=output_retries)
                 continue
             from infinidev.engine.hooks.hooks import HookContext, HookEvent, hook_manager
             hook_manager.dispatch(HookContext(
@@ -1197,6 +1217,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         verification.observation.locator = reference or None
                     if workspace_effect or state.plan is not previous_plan:
                         persist_work(checkpoint=True)
+                    if output_retries == 1:
+                        workspace_effect_since_cutoff |= workspace_effect
                 archive_metadata = {'_archive_reference': reference, '_archive_characters': len(body)}
                 if reference:
                     body += '\n' + reference

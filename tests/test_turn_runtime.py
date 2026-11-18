@@ -755,6 +755,46 @@ def test_two_output_limits_end_the_turn_without_dispatch(runtime):
     assert result.public_messages == []
 
 
+@pytest.mark.parametrize('scenario', ['changed', 'reverted', 'third_cutoff'])
+def test_second_output_recovery_requires_a_changed_workspace_revision(
+    runtime, scenario, workspace_dir, auto_approve_permissions,
+):
+    from infinidev.tools.file.edit_file_tool import EditFileTool
+
+    engine, agent, script, seen = runtime
+    file = workspace_dir / 'sample.txt'
+    partial = reply('Partial edit.', finish_reason='length')
+    change = reply('', tc('edit_file', file_path='sample.txt', old_string='line one',
+                          new_string='modified'))
+    close_cutoff = reply('', tc('finish_turn', message='Unobserved close.'), finish_reason='length')
+    responses = [partial, change]
+    if scenario == 'reverted':
+        responses.append(reply('', tc('edit_file', file_path='sample.txt', old_string='modified',
+                                      new_string='line one')))
+    responses.append(close_cutoff)
+    if scenario == 'third_cutoff':
+        responses.extend([reply('', tc('edit_file', file_path='sample.txt', old_string='modified',
+                                      new_string='changed again')), close_cutoff])
+    responses.append(reply('', tc('finish_turn', message='Done.')))
+    script(*responses)
+
+    result = engine.run_turn(agent, 'Edit and report.', task_tools=[EditFileTool()],
+                             max_iterations=0, max_total_tool_calls=0)
+
+    if scenario == 'changed':
+        assert result.status == 'answered'
+        assert result.message == 'Done.'
+        assert len(seen) == 4
+        assert 'finish_turn' in seen[-1][0][-1]['content']
+        assert 'Unobserved close.' not in str(seen[-1][0])
+        assert file.read_text().startswith('modified\n')
+    else:
+        assert result.status == 'exhausted'
+        assert len(seen) == (4 if scenario == 'reverted' else 5)
+        expected = 'line one' if scenario == 'reverted' else 'changed again'
+        assert file.read_text().startswith(expected + '\n')
+
+
 def test_actual_edit_emits_file_change_callback(runtime, auto_approve_permissions):
     engine, agent, script, seen = runtime
     from pathlib import Path
