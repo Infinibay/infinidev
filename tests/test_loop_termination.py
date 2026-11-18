@@ -1031,18 +1031,24 @@ def test_prior_edit_without_step_verification_cannot_skip_implementation():
     assert result.interrupted is True
 
 
-def test_prior_edit_and_current_green_test_can_close_model_step():
+def test_prior_edit_and_current_green_test_can_close_model_step(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
     from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
 
     ctx = _ctx()
+    ctx.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
     ctx.state.task_has_edits = True
+    ctx.state.last_test_command = "python -m pytest tests/test_eventbus.py -q"
+    ctx.state.last_test_exit_code = 0
+    ctx.state.last_verified_test_revision = ctx.file_tracker.workspace_revision()
     ctx.state.plan.steps = [
         PlanStep(index=4, title="Implement event dispatch", status="active"),
     ]
     result = StepResult(summary="The focused event tests pass", status="continue")
     result.behavior_tracker = SimpleNamespace(
         files_edited=set(),
-        successful_test_commands=["python -m pytest tests/test_eventbus.py -q"],
+        successful_test_commands=[ctx.state.last_test_command],
     )
 
     assert _enforce_step_effect(ctx, result) is False
@@ -1050,7 +1056,8 @@ def test_prior_edit_and_current_green_test_can_close_model_step():
     assert "successful test command" in result.summary
 
 
-def test_prior_edit_and_persisted_green_workspace_can_close_model_step(tmp_path):
+@pytest.mark.parametrize("has_revision", [False, True])
+def test_prior_edit_and_persisted_test_requires_verified_workspace(tmp_path, has_revision):
     from infinidev.engine.file_change_tracker import FileChangeTracker
     from infinidev.engine.guidance import normalize_test_command
     from infinidev.engine.loop.plan_step import PlanStep
@@ -1067,23 +1074,23 @@ def test_prior_edit_and_persisted_green_workspace_can_close_model_step(tmp_path)
     ctx.state.last_test_command = "python -m pytest -q"
     ctx.state.last_test_exit_code = 0
     test_key = normalize_test_command(ctx.state.last_test_command)
-    ctx.state.test_workspace_fingerprints[test_key] = (
-        ctx.file_tracker.change_fingerprint(reconcile=True)
-    )
+    ctx.state.test_workspace_fingerprints[test_key] = ctx.file_tracker.change_fingerprint()
+    if has_revision:
+        ctx.state.last_verified_test_revision = ctx.file_tracker.workspace_revision()
     result = StepResult(summary="The unchanged workspace is still green", status="continue")
     result.behavior_tracker = SimpleNamespace(
         files_edited=set(),
         successful_test_commands=[],
     )
 
-    assert _enforce_step_effect(ctx, result) is False
-    assert _should_advance_plan(result) is True
-    assert "persisted green test" in result.summary
+    assert _enforce_step_effect(ctx, result) is not has_revision
+    if has_revision:
+        assert _should_advance_plan(result) is True
+        assert "persisted green test" in result.summary
 
 
 def test_persisted_green_test_for_an_older_workspace_cannot_close_step(tmp_path):
     from infinidev.engine.file_change_tracker import FileChangeTracker
-    from infinidev.engine.guidance import normalize_test_command
     from infinidev.engine.loop.plan_step import PlanStep
     from infinidev.engine.workspace_baseline import WorkspaceBaseline
 
@@ -1097,8 +1104,7 @@ def test_persisted_green_test_for_an_older_workspace_cannot_close_step(tmp_path)
     ]
     ctx.state.last_test_command = "python -m pytest -q"
     ctx.state.last_test_exit_code = 0
-    test_key = normalize_test_command(ctx.state.last_test_command)
-    ctx.state.test_workspace_fingerprints[test_key] = ()
+    ctx.state.last_verified_test_revision = ctx.file_tracker.workspace_revision()
     path.write_text("after\n")
     ctx.file_tracker.record(str(path), "before\n", "after\n")
     result = StepResult(summary="The test predates the latest edit", status="continue")
@@ -1785,10 +1791,15 @@ def test_pending_step_reconciliation_precedes_whole_task_edit_gate():
     assert _should_advance_plan(result) is True
 
 
-def test_task_completion_folds_pending_model_step_after_edit_interruption(tmp_path):
+@pytest.mark.parametrize("later_edit", [None, "content", "empty_file", "permissions"])
+def test_task_completion_folds_pending_model_step_only_for_tested_revision(tmp_path, later_edit):
+    import json
+
     from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
     from infinidev.engine.loop.plan_step import PlanStep
     from infinidev.engine.loop.step_manager import StepManager
+    from infinidev.engine.loop.tool_runner import ToolRunner
     from infinidev.engine.workspace_baseline import WorkspaceBaseline
 
     path = tmp_path / "event_dispatch.py"
@@ -1807,16 +1818,31 @@ def test_task_completion_folds_pending_model_step_after_edit_interruption(tmp_pa
     path.write_text("enabled = True\n")
     tracker.record(str(path), "enabled = False\n", "enabled = True\n")
     result = StepResult(summary="Implementation and focused test complete", status="done")
-    result.behavior_tracker = SimpleNamespace(
-        files_edited=set(),
-        successful_test_commands=["python -m pytest tests/test_event_dispatch.py -q"],
+    result.behavior_tracker = BehaviorTracker(set())
+    command = json.dumps({"command": "python -m pytest tests/test_event_dispatch.py -q"})
+    observed_revision = tracker.workspace_revision()
+    test_result = ToolRunner.capture_test_output(
+        ctx, command, json.dumps({"exit_code": 0, "stdout": "1 passed", "success": True}),
+    )
+    ToolRunner._record_successful_step_test(
+        ctx, command, test_result, result.behavior_tracker, observed_revision,
     )
 
+    if later_edit == "content":
+        path.write_text("enabled = 'not a boolean'\n")
+    elif later_edit == "empty_file":
+        (tmp_path / "unverified.py").touch()
+    elif later_edit == "permissions":
+        path.chmod(0o755)
     reconciled = StepManager.reconcile_task_completion(ctx, result)
 
-    assert reconciled.status == "done"
-    assert ctx.state.plan.steps[1].status == "done"
-    assert "dispatch, event" in ctx.state.plan.steps[1].conclusion
+    if later_edit:
+        assert reconciled.status == "continue"
+        assert ctx.state.plan.steps[1].status == "pending"
+    else:
+        assert reconciled.status == "done"
+        assert ctx.state.plan.steps[1].status == "done"
+        assert "dispatch, event" in ctx.state.plan.steps[1].conclusion
 
 
 # ── the critic's veto is bounded too ─────────────────────────────────

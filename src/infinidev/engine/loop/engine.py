@@ -594,30 +594,20 @@ def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool
     verified_by_declared_check = active.index in getattr(
         ctx.state, "objectively_verified_step_indices", set(),
     )
-    verified_by_current_test = bool(
-        getattr(tracker, "successful_test_commands", ())
+    verified_test = (
+        ctx.state.current_verified_test(file_tracker)
+        if not active.user_approved and ctx.state.task_has_edits and not verified_by_declared_check
+        else ""
     )
-    verified_by_persisted_test = False
-    if (
-        file_tracker is not None
-        and hasattr(file_tracker, "change_fingerprint")
-        and getattr(ctx.state, "last_test_exit_code", None) == 0
-        and getattr(ctx.state, "last_test_command", "")
-    ):
-        from infinidev.engine.guidance import normalize_test_command
-
-        test_key = normalize_test_command(ctx.state.last_test_command)
-        verified_by_persisted_test = (
-            ctx.state.test_workspace_fingerprints.get(test_key)
-            == file_tracker.change_fingerprint(reconcile=True)
-        )
+    verified_by_current_test = bool(
+        verified_test and verified_test in (getattr(tracker, "successful_test_commands", ()) or ())
+    )
     verified_existing_effect = (
         not active.user_approved
         and ctx.state.task_has_edits
         and (
             verified_by_declared_check
-            or verified_by_current_test
-            or verified_by_persisted_test
+            or verified_test
         )
     )
     if verified_existing_effect:

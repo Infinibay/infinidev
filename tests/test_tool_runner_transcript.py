@@ -1153,6 +1153,50 @@ def test_failed_diagnostic_does_not_replace_last_passing_test_command():
     assert ctx.state.last_passing_test_command == "pytest tests/test_focused.py"
 
 
+@pytest.mark.parametrize("changes_files", [False, True])
+def test_running_a_test_records_only_a_stable_workspace_revision(tmp_path, monkeypatch, changes_files):
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    source = tmp_path / "example.py"
+    source.write_text("before\n")
+    ctx = _ctx()
+    ctx.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+    ctx.reuse_unchanged_test_results = True
+    tracker = BehaviorTracker(set())
+    executions = 0
+
+    def execute(*args, **kwargs):
+        nonlocal executions
+        executions += 1
+        if changes_files:
+            source.write_text("after\n")
+        return json.dumps({"exit_code": 0, "success": True, "stdout": "1 passed"})
+
+    monkeypatch.setattr("infinidev.engine.loop.tool_runner.execute_tool_call", execute)
+    runner = ToolRunner(_engine())
+    runner._run_batches(
+        ctx, [_call("test-1", "execute_command", '{"command":"pytest -q"}')],
+        [], 0, 0, LoopGuard(is_small=False), tracker, [], [],
+    )
+
+    assert ctx.state.last_test_exit_code == 0
+    assert ctx.state.current_verified_test(ctx.file_tracker) == ("" if changes_files else "pytest -q")
+    if not changes_files:
+        runner._run_batches(
+            ctx, [_call("test-2", "execute_command", '{"command":"pytest -q"}')],
+            [], 0, 1, LoopGuard(is_small=False), tracker, [], [],
+        )
+        assert executions == 1
+        assert ctx.state.current_verified_test(ctx.file_tracker) == "pytest -q"
+        (tmp_path / "new_empty_source.py").touch()
+        runner._run_batches(
+            ctx, [_call("test-3", "execute_command", '{"command":"pytest -q"}')],
+            [], 0, 2, LoopGuard(is_small=False), tracker, [], [],
+        )
+        assert executions == 2
+        assert ctx.state.current_verified_test(ctx.file_tracker) == "pytest -q"
+
+
 def test_conflicting_test_output_leaves_verification_unknown_and_retriable():
     from infinidev.engine.guidance import normalize_test_command
 

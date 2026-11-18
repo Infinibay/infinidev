@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.plan_step import PlanStep
 from infinidev.engine.loop.step_manager import StepManager
 from infinidev.engine.loop.step_result import StepResult
 from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+from infinidev.engine.workspace_baseline import WorkspaceBaseline
 
 
 def _state(*steps: PlanStep) -> LoopState:
@@ -94,6 +96,10 @@ class TestPrematureTaskCompletion:
         )
         context = _ctx(state)
         context.agent.workspace_path = str(tmp_path)
+        context.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+        state.last_test_command = "pytest -q"
+        state.last_test_exit_code = 0
+        state.last_verified_test_revision = context.file_tracker.workspace_revision()
         tracker = BehaviorTracker(set())
         tracker.files_edited.update({"dispatcher.py", "registry.py"})
         tracker.successful_test_commands.append("pytest -q")
@@ -117,6 +123,10 @@ class TestPrematureTaskCompletion:
         )
         context = _ctx(state)
         context.agent.workspace_path = str(tmp_path)
+        context.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+        state.last_test_command = "pytest -q"
+        state.last_test_exit_code = 0
+        state.last_verified_test_revision = context.file_tracker.workspace_revision()
         tracker = BehaviorTracker(set())
         tracker.files_edited.add("registry.py")
         tracker.successful_test_commands.append("pytest -q")

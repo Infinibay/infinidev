@@ -27,6 +27,18 @@ code printed in the log. The observed `exit_code` and `success` still
 describe the command execution. A conflicting result leaves verification
 unconfirmed and allows a fresh run.
 
+## Test evidence at Step boundaries
+
+The Step engine records a passing test against the observed workspace
+revision when the snapshots before and after the command agree. Before
+using that test to satisfy a pending model-authored Step, it compares the
+recorded revision with the current workspace. The bounded snapshot covers
+file content, modes, empty files and removals. A changed revision also
+lets the agent rerun the most recently verified command. The stored
+revision survives a checkpoint. A command from an older checkpoint
+without a recorded revision remains available as history. The command
+that ran determines test coverage.
+
 ## Configuration
 
 Settings may be placed in the project-local `.infinidev/settings.json` or set

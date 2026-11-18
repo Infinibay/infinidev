@@ -401,6 +401,13 @@ class ToolRunner:
             is_parallel = len(executable_batch) > 1 and not any(
                 _writes_or_mutates(tc) for tc in batch
             )
+            test_workspace_before = None
+            if len(executable_batch) == 1 and executable_batch[0].function.name == "execute_command":
+                from infinidev.engine.guidance import is_test_command
+
+                if is_test_command(executable_batch[0].function.arguments, ctx.state):
+                    with best_effort("test workspace snapshot unavailable"):
+                        test_workspace_before = ctx.file_tracker.workspace_revision()
 
             self._engine._begin_tool_batch()
             try:
@@ -440,6 +447,7 @@ class ToolRunner:
                 ctx, batch_results, messages, action_tool_calls, iteration,
                 is_parallel, guard, tracker, tool_results_text, deferred,
                 attachments_by_tc,
+                test_workspace_before=test_workspace_before,
             )
             ctx.state.tick_opened_files(1)
 
@@ -701,6 +709,13 @@ class ToolRunner:
             command = str(args.get("command", "")) if isinstance(args, dict) else ""
             key = normalize_test_command(command)
             if key not in checkpoints or checkpoints[key] != fingerprint:
+                executable.append(tc)
+                continue
+            if (
+                ctx.state.last_verified_test_revision is not None
+                and key == normalize_test_command(ctx.state.last_test_command)
+                and not ctx.state.current_verified_test(file_tracker)
+            ):
                 executable.append(tc)
                 continue
             history = ctx.state.test_outcome_history.get(key, [])
@@ -1187,6 +1202,8 @@ class ToolRunner:
         tool_results_text: list[str],
         deferred: list[dict[str, Any]],
         attachments_by_tc: dict[str, list] | None = None,
+        *,
+        test_workspace_before: str | None = None,
     ) -> int:
         """Write one batch's results into the conversation.
 
@@ -1244,7 +1261,7 @@ class ToolRunner:
                 # test parsing can append prose and make the JSON non-parseable;
                 # never alter the result the model receives.
                 self._propagate_command_output_handles(ctx, tc.id, result)
-                if not tool_error:
+                if not tool_error and not no_new_evidence:
                     # A denied or malformed command did not run. Recording it as
                     # the latest test command makes the deterministic reviewer
                     # replay a known denial and reject otherwise-green work.
@@ -1253,6 +1270,7 @@ class ToolRunner:
                     )
                     self._record_successful_step_test(
                         ctx, tc.function.arguments, result, tracker,
+                        test_workspace_before,
                     )
                     self._refresh_opened_files_after_shell(
                         ctx, tc.function.arguments,
@@ -1592,6 +1610,7 @@ class ToolRunner:
         arguments: str,
         result: str,
         tracker: BehaviorTracker,
+        workspace_before: str | None = None,
     ) -> None:
         """Attach a successful recognised test command to Step-local evidence."""
         with best_effort("step test evidence capture failed for %s", arguments[:80]):
@@ -1608,7 +1627,16 @@ class ToolRunner:
                 and payload.get("success", True) is not False
                 and payload.get("test_output_conflict") is not True
             ):
-                tracker.on_successful_test(command)
+                tracker.on_successful_test(command[:300])
+                if (
+                    workspace_before is not None
+                    and workspace_before == ctx.file_tracker.workspace_revision()
+                ):
+                    ctx.state.last_verified_test_revision = workspace_before
+                elif workspace_before is not None:
+                    from infinidev.engine.guidance import normalize_test_command
+
+                    ctx.state.test_workspace_fingerprints.pop(normalize_test_command(command), None)
 
     @staticmethod
     def capture_test_output(
@@ -1645,6 +1673,7 @@ class ToolRunner:
             except Exception:
                 command = arguments
             ctx.state.last_test_command = command[:300]
+            ctx.state.last_verified_test_revision = None
             try:
                 payload = json.loads(result)
             except (json.JSONDecodeError, TypeError):

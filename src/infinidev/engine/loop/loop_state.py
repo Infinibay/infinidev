@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,9 @@ from infinidev.engine.loop.action_record import ActionRecord
 from infinidev.engine.loop.loop_plan import LoopPlan
 from infinidev.engine.loop.opened_file import OpenedFile
 from infinidev.engine.loop.user_guidance import UserGuidance
+
+if TYPE_CHECKING:
+    from infinidev.engine.file_change_tracker import FileChangeTracker
 
 logger = logging.getLogger(__name__)
 
@@ -142,11 +145,13 @@ class LoopState(BaseModel):
     # Most recent recognised test command that exited successfully. Failed
     # diagnostic suites must not replace the review gate with unrelated debt.
     last_passing_test_command: str = ""
-    # Exit status of the latest recognised test command. ``None`` means no
-    # test has run in this Task. A failing latest run is a deterministic
+    # Exit status of the latest recognised test command. None means it is
+    # unavailable or unconfirmed. A failing latest run is a deterministic
     # completion veto until a later test succeeds (or the model reports a
     # genuine blocked outcome).
     last_test_exit_code: int | None = None
+    # Stable workspace observed on both sides of the latest passing test.
+    last_verified_test_revision: str | None = None
     # Per-test-command outcome history. Keyed by the *normalised* test
     # command (positional targets without flags) so two runs of the
     # same test set are recognised as comparable even if the model
@@ -197,6 +202,17 @@ class LoopState(BaseModel):
     # received — never a private full command-output blob. It also survives
     # manual mode and small-model transcript compaction.
     pending_archive: list[tuple[str, str, str]] = Field(default_factory=list)
+
+    def current_verified_test(self, file_tracker: FileChangeTracker | None) -> str:
+        """Return the passing command only while its observed files still match."""
+        if (
+            self.last_test_exit_code == 0
+            and self.last_verified_test_revision is not None
+            and file_tracker is not None
+            and self.last_verified_test_revision == file_tracker.workspace_revision()
+        ):
+            return self.last_test_command
+        return ""
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""

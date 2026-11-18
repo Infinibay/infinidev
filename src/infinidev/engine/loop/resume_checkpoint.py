@@ -194,6 +194,7 @@ def build_loop_resume_checkpoint(
             "last_test_command",
             "last_passing_test_command",
             "last_test_exit_code",
+            "last_verified_test_revision",
             "test_outcome_history",
             "pending_archive",
         }

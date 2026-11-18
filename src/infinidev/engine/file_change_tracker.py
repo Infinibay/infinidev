@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import os
 
 from infinidev.engine.workspace_baseline import WorkspaceBaseline, WorkspaceFileState
@@ -232,6 +233,17 @@ class FileChangeTracker:
             ).hexdigest()
             rows.append((path, digest))
         return tuple(sorted(rows))
+
+    def workspace_revision(self) -> str | None:
+        """Identify the current observed files, including empty files and removals."""
+        if self._baseline is None:
+            return None
+        entries = self._baseline.current_states(include_text=False)
+        identity = json.dumps((
+            self._baseline.root,
+            sorted((path, state.digest, state.mode) for path, state in entries.items()),
+        ))
+        return hashlib.sha256(identity.encode("ascii")).hexdigest()
 
     def record_deleted_symbols(self, path: str, symbols: list[str]) -> None:
         """Record symbol names that were removed from a file.

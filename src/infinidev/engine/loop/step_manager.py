@@ -174,10 +174,10 @@ def _fold_verified_model_steps(
     files_edited = set(getattr(tracker, "files_edited", ()) or ())
     if not files_edited:
         files_edited = _persisted_active_edit_paths(ctx)
-    successful_tests = list(
-        getattr(tracker, "successful_test_commands", ()) or ()
-    )
-    if not files_edited or not successful_tests:
+    if not files_edited or not getattr(tracker, "successful_test_commands", ()):
+        return
+    verified_test = ctx.state.current_verified_test(getattr(ctx, "file_tracker", None))
+    if not verified_test or verified_test not in tracker.successful_test_commands:
         return
 
     evidence_words = _edited_evidence_words(ctx, files_edited)
@@ -200,7 +200,7 @@ def _fold_verified_model_steps(
         step.conclusion = (
             f"Satisfied within Step {active.index if active is not None else '?'}: "
             f"changed files cover {', '.join(sorted(covered))}; "
-            f"verified by {successful_tests[-1]}."
+            f"verified by {verified_test}."
         )
 
 

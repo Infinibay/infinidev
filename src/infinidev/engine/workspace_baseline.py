@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 _MAX_CAPTURE_BYTES = 2 * 1024 * 1024
@@ -49,6 +49,7 @@ class WorkspaceFileState:
 
     digest: str
     text: str | None
+    mode: int = field(default=0, compare=False)
 
 
 class WorkspaceBaseline:
@@ -69,11 +70,11 @@ class WorkspaceBaseline:
         paths, git = _workspace_paths(real_root)
         return cls(real_root, _read_states(real_root, paths), git=git)
 
-    def current_states(self) -> dict[str, WorkspaceFileState]:
+    def current_states(self, *, include_text: bool = True) -> dict[str, WorkspaceFileState]:
         """Read the same workspace domain at task completion."""
 
         paths, _ = _workspace_paths(self.root, prefer_git=self.git)
-        return _read_states(self.root, paths)
+        return _read_states(self.root, paths, include_text=include_text)
 
     def changed_paths(self) -> list[str]:
         """Relative paths whose final content differs from task start."""
@@ -187,6 +188,7 @@ def _read_content_state(
     *,
     max_hash_bytes: int,
     max_text_bytes: int,
+    mode: int,
 ) -> tuple[WorkspaceFileState | None, int, int]:
     """Hash one bounded file in chunks and optionally retain its text."""
 
@@ -214,10 +216,12 @@ def _read_content_state(
         else None
     )
     text_bytes = len(text_buffer) if text_buffer is not None else 0
-    return WorkspaceFileState(digest=hasher.hexdigest(), text=text), bytes_read, text_bytes
+    return WorkspaceFileState(digest=hasher.hexdigest(), text=text, mode=mode), bytes_read, text_bytes
 
 
-def _read_states(root: str, paths: list[str]) -> dict[str, WorkspaceFileState]:
+def _read_states(
+    root: str, paths: list[str], *, include_text: bool = True,
+) -> dict[str, WorkspaceFileState]:
     states: dict[str, WorkspaceFileState] = {}
     remaining_hash_bytes = _MAX_TOTAL_HASH_BYTES
     remaining_text_bytes = _MAX_TOTAL_CAPTURE_BYTES
@@ -237,12 +241,13 @@ def _read_states(root: str, paths: list[str]) -> dict[str, WorkspaceFileState]:
             states[relative] = WorkspaceFileState(
                 digest=_metadata_digest(stat_result),
                 text=None,
+                mode=stat_result.st_mode,
             )
             continue
 
         max_text_bytes = (
             min(_MAX_CAPTURE_BYTES, remaining_text_bytes)
-            if size <= _MAX_CAPTURE_BYTES and size <= remaining_text_bytes
+            if include_text and size <= _MAX_CAPTURE_BYTES and size <= remaining_text_bytes
             else -1
         )
         try:
@@ -250,6 +255,7 @@ def _read_states(root: str, paths: list[str]) -> dict[str, WorkspaceFileState]:
                 absolute,
                 max_hash_bytes=min(_MAX_HASH_BYTES_PER_FILE, remaining_hash_bytes),
                 max_text_bytes=max_text_bytes,
+                mode=stat_result.st_mode,
             )
         except OSError:
             continue
@@ -261,6 +267,7 @@ def _read_states(root: str, paths: list[str]) -> dict[str, WorkspaceFileState]:
             states[relative] = WorkspaceFileState(
                 digest=_metadata_digest(stat_result),
                 text=None,
+                mode=stat_result.st_mode,
             )
             continue
 
