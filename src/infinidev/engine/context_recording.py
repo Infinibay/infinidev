@@ -21,7 +21,7 @@ _CURRENT: contextvars.ContextVar[ContextRecorder | None] = contextvars.ContextVa
     'passive_context_recording', default=None)
 _ORIGINS = {
     'history', 'literal_input', 'conversation_context', 'prior_state', 'ken',
-    'task_start', 'workspace', 'task_end_instruction', 'injected_guidance',
+    'task_start', 'workspace', 'task_end_instruction', 'injected_guidance', 'delivery_verification',
     'manual_tools', 'system.identity', 'system.backstory', 'system.protocol',
     'system.optional_capability', 'system.tech_hint', 'system.project_instructions',
     'system.session_summary', 'unknown',
@@ -29,7 +29,8 @@ _ORIGINS = {
 _ROLES = {'system', 'user', 'assistant', 'tool'}
 _KNOWN_ROLES = _ROLES | {'developer', 'work_summary'}
 _PRIVATE_ORIGINS = {'prior_state', 'system.session_summary', 'system.project_instructions',
-                    'system.backstory', 'ken', 'task_start', 'task_end_instruction'}
+                    'system.backstory', 'ken', 'task_start', 'task_end_instruction',
+                    'delivery_verification'}
 
 
 def _digest(value: str) -> str:

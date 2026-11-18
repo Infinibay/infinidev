@@ -496,6 +496,22 @@ requests were 6 and 5, with 25,059 and 21,637 input tokens respectively.
 This checks the production context path. The measurement uses a replayed
 ranking and excludes live retrieval latency.
 
+### Checking a draft against observations before delivery
+
+A delivery-verifier probe replayed Bruma's public draft from turn 1299
+after dispatching the original scoped read. A static checker rejected
+the wrong document path and target. Qwen revised the example in two
+model requests and closed through `finish_turn`. The checker accepted
+the revised script's basic form, and the pipeline withheld the original
+draft. The probe evaluated text and did not execute the script.
+
+The revised turn repeated the read and described its reading as unique.
+The first checker covered script form alone. A replay with the verifier
+also checking the engine's cumulative `dispatched_tools` observed one
+read at the first draft and two at the second. It rejected both drafts,
+published a failure status, and preserved the fixture. This probes the
+verification lifecycle using one historical draft and its live revision.
+
 ### What a task record means
 
 ```json

@@ -159,6 +159,7 @@ def test_global_budget_stops_inside_batch(runtime):
     result = engine.run_turn(agent, 'Work', max_total_tool_calls=1)
     assert result.status == 'exhausted'
     assert result.metrics['tool_calls'] == 1
+    assert result.dispatched_tools == {'record': 1}
     assert engine._last_turn_receipt['dispatches'] == 1
     assert 'The second item is pending.' in result.message
     records = seen[1][0][-3:-1]

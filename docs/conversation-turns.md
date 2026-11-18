@@ -72,6 +72,25 @@ path. They do not customize `run_turn`. The principal honors the agent identity
 and backstory, repository `AGENTS.md` instructions, and enabled optional
 capabilities through its conversational prompt.
 
+## SDK delivery verification
+
+Principal SDK callers can pass `verify_delivery` to `run_task`. The
+callable receives a `DeliveryDraft` with the proposed `public_messages`
+and final `message`, both prepared for public display. The pipeline
+holds that text while the callable verifies it.
+
+The read-only `dispatched_tools` mapping counts dispatcher attempts by
+tool name across the original pass and revision. It includes closure
+calls such as `finish_turn`. A verifier can use it to check action limits
+independently of claims in the draft.
+
+Return `None` to accept the draft. Return a nonempty diagnostic to
+request one revision with the original tool grant and remaining budget.
+The verifier checks the revised draft before publication. Rejection of
+the revision, verifier failure, or budget exhaustion produces a status
+message. File changes already made by the turn remain available for
+inspection. The verifier runs synchronously in the SDK caller's process.
+
 ## Verified source at turn start
 
 Set `INFINIDEV_TASK_KEN_SOURCE_CONTEXT_ENABLED=true` to opt in. The

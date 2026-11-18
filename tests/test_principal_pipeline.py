@@ -112,6 +112,75 @@ def test_hook_continuation_uses_remaining_budget_without_new_turn(boundary, monk
     engine.begin_turn.assert_called_once()
 
 
+def test_delivery_verifier_revises_before_publishing(boundary):
+    _, engine, hooks = boundary
+    engine.run_turn.side_effect = [
+        TurnResult(message="bad example", public_messages=["bad snippet"],
+                   status="answered", state=TurnState(),
+                   dispatched_tools={"read_file": 1, "finish_turn": 1},
+                   metrics={"observed_iterations": 2, "observed_tool_calls": 3}),
+        TurnResult(message="correct example", public_messages=["correct snippet"],
+                   status="answered", state=TurnState(),
+                   dispatched_tools={"read_file": 1, "finish_turn": 1}),
+    ]
+    verify = Mock(side_effect=["Use the verified argument form.", None])
+
+    assert call(boundary, "Give an example.", verify_delivery=verify) == "correct example"
+    first, second = [args.args[0] for args in verify.call_args_list]
+    assert (first.public_messages, first.message) == (("bad snippet",), "bad example")
+    assert (second.public_messages, second.message) == (("correct snippet",), "correct example")
+    assert first.dispatched_tools == {"read_file": 1, "finish_turn": 1}
+    assert second.dispatched_tools == {"read_file": 2, "finish_turn": 2}
+    with pytest.raises(TypeError):
+        first.dispatched_tools["read_file"] = 0
+    assert [args.args[1] for args in hooks.notify.call_args_list] == [
+        "correct snippet", "correct example",
+    ]
+    assert all(args.kwargs["on_public_message"] is None for args in engine.run_turn.call_args_list)
+    corrected = engine.run_turn.call_args
+    assert corrected.args[1] == "Give an example."
+    assert corrected.kwargs["max_iterations"] == 8
+    assert corrected.kwargs["max_total_tool_calls"] == 17
+    correction = corrected.kwargs["turn_context"]
+    assert "Use the verified argument form." in correction
+    assert "bad example" in correction and "bad snippet" in correction
+
+
+@pytest.mark.parametrize("feedback,used,attempts,diagnostic", [
+    ("wrong fixture", 2, 2, "did not pass verification"),
+    ("wrong fixture", 10, 1, "exhausted its budget"),
+    ("", 2, 1, "invalid verdict"),
+])
+def test_unverified_delivery_is_withheld(boundary, feedback, used, attempts, diagnostic):
+    _, engine, hooks = boundary
+    engine.run_turn.return_value = TurnResult(
+        message="unverified final", public_messages=["unverified draft"],
+        status="answered", state=TurnState(),
+        metrics={"observed_iterations": used, "observed_tool_calls": 1},
+    )
+    verify = Mock(return_value=feedback)
+
+    result = call(boundary, verify_delivery=verify)
+    assert diagnostic in result
+    assert verify.call_count == engine.run_turn.call_count == attempts
+    hooks.notify.assert_called_once_with("Infinidev", result, "agent")
+
+
+def test_delivery_verifier_cannot_be_bypassed_by_a_budget_report(boundary):
+    _, engine, hooks = boundary
+    engine.run_turn.return_value = TurnResult(
+        message="Conversation interrupted.\nUnverified proposed script.",
+        status="exhausted", state=TurnState(),
+    )
+    verify = Mock(return_value=None)
+
+    result = call(boundary, verify_delivery=verify)
+    assert "before delivery verification" in result
+    assert "Unverified proposed script." not in result
+    verify.assert_not_called()
+    hooks.notify.assert_called_once_with("Infinidev", result, "agent")
+
+
 @pytest.mark.parametrize("bad", [None, "Done", SimpleNamespace(status="completed", message="ok"),
                                   TurnResult(message="", status="answered", state=TurnState())])
 def test_invalid_result_fails_closed(boundary, monkeypatch, bad):

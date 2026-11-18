@@ -26,17 +26,21 @@ this file.
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Callable, Sequence
 import contextlib
-from collections.abc import Sequence
 from dataclasses import replace as _dc_replace
+import json
 import logging
 import os
+from types import MappingProxyType
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.context_recording import current_recorder, recorded_context
 from infinidev.engine.session_status import current_observer, observed_principal
 from infinidev.engine.turns.catalog import ToolGrant, freeze_task_tools
+from infinidev.engine.turns.models import DeliveryDraft
 from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 logger = logging.getLogger(__name__)
@@ -865,6 +869,7 @@ def run_task(
     task_tools: Sequence[Any] | None = None,
     record_context_dir: str | os.PathLike[str] | None = None,
     tool_call_metadata: bool = False,
+    verify_delivery: Callable[[DeliveryDraft], str | None] | None = None,
     _hook_reentry: bool = False,
     _autonomous_budget: Any = None,
 ) -> str:
@@ -877,6 +882,9 @@ def run_task(
     Callers must still construct ``agent``, ``engine``, ``reviewer``,
     and ``hooks``. The project_id and workspace_path for the chat agent
     are resolved from the agent's bound context.
+
+    A principal SDK caller may verify a draft before publication. Return
+    None to accept it or nonempty feedback to request one budgeted revision.
 
     A turn is also the unit the user's ``task_start`` / ``task_end_*``
     hooks are scoped to (see ``engine/user_hooks/``). ``_hook_reentry`` is
@@ -904,6 +912,9 @@ def run_task(
     def uses_principal() -> bool:
         return (normalize_mode(_settings.TASK_ENGINE_MODE) == "task"
                 and not autonomous and not use_phase_engine)
+
+    if verify_delivery is not None and (not callable(verify_delivery) or not uses_principal()):
+        raise ValueError("Delivery verification requires a callable and the principal engine")
 
     conversational = uses_principal() if task_tools is not None else None
     recorder = current_recorder()
@@ -1155,6 +1166,7 @@ def run_task(
             workspace_path=agent_workspace,
             prompt_configuration=prompt_configuration, skip_instruction=_hook_reentry,
             tool_grant=tool_grant, tool_call_metadata=tool_call_metadata,
+            verify_delivery=verify_delivery,
         )
 
     root_task = runtime.add_task(
@@ -1554,9 +1566,11 @@ def _run_principal_turn(
     workspace_path: str | None = None,
     tool_grant: ToolGrant | None = None,
     tool_call_metadata: bool = False,
+    verify_delivery: Callable[[DeliveryDraft], str | None] | None = None,
 ) -> str:
     """Close a conversational turn without creating or advancing work Tasks."""
     from infinidev.config.settings import settings
+    from infinidev.config.secrets import redact
     from infinidev.engine.loop.user_message_injector import InjectedUserMessage
     from infinidev.engine.turns.models import TurnResult
     from infinidev.engine.user_hooks import UserHookEvent, task_instruction
@@ -1570,10 +1584,10 @@ def _run_principal_turn(
     history_initialized = False
     final_message_hash = None
     parent_guidance: list[InjectedUserMessage] = []
+    dispatched_tools: Counter[str] = Counter()
 
     def publish(message: str, *, final: bool = False) -> None:
         nonlocal reply_marked, history_initialized, final_message_hash
-        from infinidev.config.secrets import redact
         from infinidev.db.service import (
             execute_with_retry, register_session, store_conversation_turn, store_session_message,
         )
@@ -1634,7 +1648,7 @@ def _run_principal_turn(
                 max_total_tool_calls=remaining_tools,
                 prompt_configuration=prompt_configuration,
                 preserve_file_tracker=bool(pass_index),
-                on_public_message=publish,
+                on_public_message=publish if verify_delivery is None else None,
                 **selected,
             )
             valid = (
@@ -1649,9 +1663,41 @@ def _run_principal_turn(
                 result = "Conversation failed: the agent returned an invalid turn result."
             if getattr(engine, "is_cancelled", False):
                 status, result = "cancelled", "Conversation cancelled."
+            feedback = None
+            if verify_delivery is not None and status == "answered":
+                dispatched_tools.update(turn.dispatched_tools)
+                draft = DeliveryDraft(
+                    tuple(map(redact, turn.public_messages)),
+                    redact(result),
+                    MappingProxyType(dict(dispatched_tools)),
+                )
+                try:
+                    feedback = verify_delivery(draft)
+                except Exception as exc:
+                    logger.warning("Delivery verifier raised %s", type(exc).__name__)
+                    status, result = "failed", "Conversation failed: delivery verification failed."
+                    break
+                if getattr(engine, "is_cancelled", False):
+                    status, result = "cancelled", "Conversation cancelled."
+                    break
+                if feedback is None:
+                    for part in draft.public_messages:
+                        publish(part)
+                    result = draft.message
+                elif not isinstance(feedback, str) or not feedback.strip():
+                    status = "failed"
+                    result = "Conversation failed: delivery verifier returned an invalid verdict."
+                    break
+                elif pass_index:
+                    status = "failed"
+                    result = "Conversation failed: the revised delivery did not pass verification."
+                    break
+            elif verify_delivery is not None and status == "exhausted":
+                # A budget report may contain model-authored delivery text.
+                result = "Conversation exhausted its budget before delivery verification."
             if pass_index:
                 break
-            followup = _task_end_hook(
+            followup = feedback if feedback is not None else _task_end_hook(
                 UserHookEvent.TASK_END_INSTRUCTION,
                 user_input=user_input, session_id=session_id, result=result,
                 files_changed=_turn_changed_files(engine), status=status,
@@ -1662,7 +1708,10 @@ def _run_principal_turn(
                 break
             if not followup or status != "answered":
                 break
-            publish(result)
+            if feedback is None:
+                publish(result)
+            else:
+                hooks.on_status("info", "Delivery verifier requested a revision.")
             # An absent or invalid usage counter must never grant another
             # model call under a finite user-configured budget.
             limits = [remaining_iterations, remaining_tools]
@@ -1684,8 +1733,20 @@ def _run_principal_turn(
             if status != "answered":
                 break
             remaining_iterations, remaining_tools = limits
-            previous_response = ('<prior-turn-response authority="context">\n' + result
-                                 + "\n</prior-turn-response>")
+            if feedback is None:
+                previous_response = ('<prior-turn-response authority="context">\n' + result
+                                     + "\n</prior-turn-response>")
+            else:
+                from infinidev.engine.user_hooks.runner import MAX_OUTPUT_CHARS
+
+                draft_json = json.dumps({
+                    'public_messages': draft.public_messages, 'message': draft.message,
+                }, ensure_ascii=False).replace('<', r'\u003c')
+                previous_response = ('<rejected-delivery authority="context">\n' + draft_json
+                                     + '\n</rejected-delivery>')
+                followup = ('Revise the complete delivery within the original request scope '
+                            'using the following verifier feedback.\n'
+                            + redact(feedback.strip())[:MAX_OUTPUT_CHARS])
             instruction_context = task_instruction(followup)
             recorder = current_recorder()
             previous_context = (recorder.binding('turn_context', turn_context)
@@ -1695,8 +1756,11 @@ def _run_principal_turn(
             turn_context = _join_blocks(turn_context, previous_response, instruction_context)
             if recorder is not None:
                 sources = [previous_context] if previous_context else []
-                sources.append(recorder.source('conversation_context', 'assistant', previous_response))
-                sources.append(recorder.source('task_end_instruction', 'user', instruction_context))
+                draft_origin = 'delivery_verification' if feedback is not None else 'conversation_context'
+                instruction_origin = ('delivery_verification' if feedback is not None
+                                      else 'task_end_instruction')
+                sources.append(recorder.source(draft_origin, 'assistant', previous_response))
+                sources.append(recorder.source(instruction_origin, 'user', instruction_context))
                 recorder.bundle('turn_context', 'conversation_context', 'user',
                                 turn_context, sources)
     except Exception:

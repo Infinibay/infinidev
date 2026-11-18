@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -75,6 +77,15 @@ class TurnState(BaseModel):
     _validate_plan = field_validator("plan")(validate_plan)
 
 
+@dataclass(frozen=True)
+class DeliveryDraft:
+    """The proposed visible messages for an SDK delivery verifier."""
+
+    public_messages: tuple[str, ...]
+    message: str
+    dispatched_tools: Mapping[str, int]
+
+
 class TurnResult(BaseModel):
     """A conversation outcome, independent of work Task lifecycle."""
 
@@ -84,5 +95,8 @@ class TurnResult(BaseModel):
     status: Literal["answered", "cancelled", "exhausted", "failed"]
     state: TurnState
     public_messages: list[str] = Field(default_factory=list)
+    dispatched_tools: dict[str, Annotated[int, Field(strict=True, ge=0)]] = Field(
+        default_factory=dict,
+    )
     engine: Any | None = None
     metrics: dict[str, Annotated[int, Field(strict=True, ge=0)]] = Field(default_factory=dict)

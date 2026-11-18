@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import uuid
+from collections import Counter
 from collections.abc import Callable, Collection
 from pathlib import Path
 from types import SimpleNamespace
@@ -611,6 +612,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
     state = TurnState()
     references: list[str] = []
     public_messages: list[str] = []
+    dispatched_tools: Counter[str] = Counter()
     ctx = None
     iterations = 0
     invalid_batches = 0
@@ -716,7 +718,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         if iterations:
             persist_work()
         return TurnResult(message=message, status=status, state=state, engine=engine,
-                          public_messages=list(public_messages), metrics={
+                          public_messages=list(public_messages),
+                          dispatched_tools=dict(dispatched_tools), metrics={
             'observed_iterations': iterations,
             'observed_tool_calls': legacy_state.total_tool_calls,
             'observed_prompt_tokens': legacy_state.total_prompt_tokens,
@@ -1213,6 +1216,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         if observer is not None:
                             observer.record('tool', 'tool_started', tool_name=call.function.name)
                         with capture_file_reads() as file_reads:
+                            dispatched_tools[call.function.name] += 1
                             body = execute_tool_call(ctx.tool_dispatch, call.function.name, args,
                                 hook_metadata={'project_id': agent.project_id,
                                     'agent_id': agent.agent_id,
