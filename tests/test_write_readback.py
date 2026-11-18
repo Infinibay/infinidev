@@ -17,6 +17,7 @@ from tests.test_turn_runtime import reply, runtime, tc
     [
         ("enabled", True),
         ("enabled_auto", True),
+        ("compatible_localhost", True),
         ("edit", True),
         ("off", False),
         ("missing_reader", False),
@@ -52,6 +53,11 @@ def test_first_write_readback(
     monkeypatch.setattr(
         settings, "LLM_PROVIDER", "openai" if scenario == "other_provider" else "openai_compatible",
     )
+    if scenario == "compatible_localhost":
+        monkeypatch.setattr(settings, "LLM_BASE_URL", "http://localhost:8080/v1")
+        monkeypatch.setattr(turn_runtime, "get_litellm_params", lambda: {
+            "model": "custom_openai/scripted", "api_base": settings.LLM_BASE_URL,
+        })
     monkeypatch.setattr(
         turn_runtime, "get_model_capabilities",
         lambda: SimpleNamespace(

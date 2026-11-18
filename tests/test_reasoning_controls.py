@@ -71,6 +71,7 @@ def compatible_effort_route(monkeypatch):
     monkeypatch.setattr(settings, "OPENAI_COMPATIBLE_TEMPLATE_EFFORT", True)
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
 @pytest.mark.parametrize("opted_in,level,enabled,template", [
     (False, "medium", None, {"enable_thinking": False}),
     (True, "low", None, {"enable_thinking": True, "reasoning_effort": "low"}),
@@ -79,12 +80,13 @@ def compatible_effort_route(monkeypatch):
     (True, "low", False, {"enable_thinking": False}),
 ])
 def test_compatible_template_effort_reaches_native_tool_http_request(
-    monkeypatch, compatible_effort_route, opted_in, level, enabled, template,
+    monkeypatch, compatible_effort_route, host, opted_in, level, enabled, template,
 ):
     from infinidev.config.llm import get_litellm_params
     from infinidev.config import model_capabilities
     from infinidev.engine.llm_client import call_llm
 
+    monkeypatch.setattr(settings, "LLM_BASE_URL", f"http://{host}:8080/v1")
     monkeypatch.setattr(settings, "OPENAI_COMPATIBLE_TEMPLATE_EFFORT", opted_in)
     monkeypatch.setattr(settings, "THINKING_BUDGET", level)
     monkeypatch.setattr(model_capabilities, "get_model_capabilities",
@@ -121,16 +123,18 @@ def test_compatible_template_effort_reaches_native_tool_http_request(
 def test_compatible_template_effort_does_not_follow_helper_to_other_endpoint(
     compatible_effort_route,
 ):
-    from infinidev.config.llm import apply_provider_transport
+    from infinidev.config.llm import apply_provider_transport, provider_for_request
+    from infinidev.config.providers import get_provider
 
     main = {"model": settings.LLM_MODEL, "api_base": settings.LLM_BASE_URL}
-    helper = {**main, "api_base": "http://127.0.0.1:48130/v1"}
+    helper = {**main, "api_base": get_provider("vllm").default_base_url}
 
     apply_provider_transport(main, "openai_compatible")
     apply_provider_transport(helper, "openai_compatible")
 
     assert main["extra_body"]["chat_template_kwargs"]["reasoning_effort"] == "low"
     assert "extra_body" not in helper
+    assert provider_for_request(helper, settings.LLM_PROVIDER) == "vllm"
 
 
 def test_compatible_capability_probe_disables_opted_in_thinking(

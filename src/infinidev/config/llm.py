@@ -452,11 +452,17 @@ def provider_for_request(params: dict[str, Any], fallback: str) -> str:
     """Resolve helper calls from their route instead of the principal's settings."""
     from infinidev.config.providers import PROVIDERS
 
-    base = str(params.get("api_base") or "").rstrip("/").lower()
+    api_base = str(params.get("api_base") or "").rstrip("/")
+    base = api_base.lower()
     prefix = str(params.get("model", "")).split("/", 1)[0]
     if base:
         for provider in PROVIDERS.values():
             if base == provider.default_base_url.rstrip("/").lower():
+                # A stock local URL can also belong to a configured compatible server.
+                if (provider.base_url_editable and prefix == "custom_openai"
+                        and fallback == settings.LLM_PROVIDER == "openai_compatible"
+                        and api_base == settings.LLM_BASE_URL.rstrip("/")):
+                    return fallback
                 return provider.id
     if not base and prefix == "openai" and fallback == "openai_subscription":
         return fallback
