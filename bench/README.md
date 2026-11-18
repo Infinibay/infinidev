@@ -241,6 +241,18 @@ file, and closed separately in four live requests per fixture. Both final
 workspaces matched the expected files. These probes exercise recovery from a
 given invalid response. Their initial response was scripted.
 
+### Recovering from an output cutoff
+
+Two live Qwen3.8 trials on Basalt used a fixed 96-token output cap and a
+fixture that requested an oversized first edit followed by a smaller edit
+if cut off. Both recovered from a real provider `length` response, made the
+correct change, and read back the current value. The native trial hit a
+second cutoff at closure and ended `exhausted`. A follow-up trial requested
+an exact short closing message and finished through the manual protocol.
+The prompts and observed tool protocols differed between trials. The local
+HTTP streaming regression separately verifies a truncated native call,
+unchanged `max_tokens`, and a successful retry without the partial arguments.
+
 ### Verification counterexamples
 
 Three Qwen pairs offered the same fixture checker with the same prompts and
