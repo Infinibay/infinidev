@@ -465,6 +465,18 @@ from forbidden PTY calls. The trials used one reduced fixture and three
 seeds. The system-fragment variant was discarded after two trials used the
 tool budget without editing. The temporary guide remains an experiment.
 
+A follow-up sent a notice only on the request after the first successful file
+read, before any edit. It asked the model to use the observed API and edit
+once the remaining questions were answered. Three pairs reused the text
+fixture, and one pair reversed the requirements using a PTY fixture that
+holds the first acknowledgement until retirement. HTTP checks confirmed
+when the notice was sent. All eight first edits compiled and passed their
+isolated gates. The notice arm closed via `finish_turn` in 4/4 runs, versus
+3/4 controls. It used 23 model requests and 25 tool dispatches, versus 24
+and 26 controls. Total turn time rose from 75.35 to 81.51 seconds. The PTY
+pair took more requests with the notice. This follow-up did not establish
+a first-edit improvement, so the notice stayed in the probe.
+
 ### What a task record means
 
 ```json
