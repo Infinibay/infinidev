@@ -125,7 +125,8 @@ def test_same_slice_of_changed_file_remains_new_evidence(
     assert not any(has_warning(request) for request in seen)
     outputs = [item["content"].split("\n[Archived evidence", 1)[0]
                for item in seen[-1][0] if item["role"] == "tool"]
-    assert outputs == ["     1\tPINNED = 1"] * 6
+    expected = "File read coverage: versioned.py, lines 1–1 of 2 (partial).\n     1\tPINNED = 1"
+    assert outputs == [expected] * 6
     saved = get_session_runtime_state(tool_context.session_id)["ui_state"]["conversation"]
     assert len(set(saved["evidence"])) == 6
     assert len({saved["evidence_sources"][reference]["file_fingerprint"]

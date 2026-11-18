@@ -198,11 +198,15 @@ def test_runtime_issues_stable_refs_and_exact_recall_stays_complete_json(runtime
     assert engine._last_turn_receipt["dispatches"] == 2
 
 
-@pytest.mark.parametrize(("selection", "expected"), [
-    ({}, '     1\tVALUE = """first \t\n     2\tsecond  \n     3\t"""'),
-    ({"offset": 2, "limit": 1}, "     2\tsecond  "),
+@pytest.mark.parametrize(("selection", "expected", "coverage"), [
+    ({}, '     1\tVALUE = """first \t\n     2\tsecond  \n     3\t"""', ""),
+    ({"offset": 2, "limit": 1}, "     2\tsecond  ",
+     "File read coverage: literal.py, lines 2–2 of 3 (partial).\n"),
+    ({"offset": 3, "limit": 20}, '     3\t"""',
+     "File read coverage: literal.py, lines 3–3 of 3 (partial).\n"),
 ])
-def test_numbered_read_and_exact_recall_preserve_source_whitespace(runtime, selection, expected):
+def test_numbered_read_and_exact_recall_preserve_source_whitespace(
+        runtime, selection, expected, coverage):
     from pathlib import Path
 
     from infinidev.tools.file.read_file_tool import ReadFileTool
@@ -222,8 +226,30 @@ def test_numbered_read_and_exact_recall_preserve_source_whitespace(runtime, sele
                              task_tools=[ReadFileTool(), RecallContextTool()])
     assert result.status == "answered"
     observed, recalled = [m["content"] for m in seen[-1][0] if m["role"] == "tool"]
-    assert observed.rsplit("\n[Archived evidence; ", 1)[0] == expected
+    assert observed.rsplit("\n[Archived evidence; ", 1)[0] == coverage + expected
     assert json.loads(recalled)["content"] == expected
+
+
+def test_replaced_read_body_does_not_inherit_coverage(runtime, monkeypatch):
+    from pathlib import Path
+
+    from infinidev.engine.turns import runtime as turn_runtime
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    engine, agent, script, seen = runtime
+    (Path(agent.workspace_path) / "sample.txt").write_text("first\nsecond\n")
+    dispatch = turn_runtime.execute_tool_call
+
+    def replace_result(dispatcher, name, args, **kwargs):
+        body = dispatch(dispatcher, name, args, **kwargs)
+        return "Replacement output from a hook" if name == "read_file" else body
+
+    monkeypatch.setattr(turn_runtime, "execute_tool_call", replace_result)
+    script(reply("", tc("read_file", file_path="sample.txt", limit=1)),
+           reply("", tc("finish_turn", message="Done.")))
+    assert engine.run_turn(agent, "Read sample.txt", task_tools=[ReadFileTool()]).status == "answered"
+    body = next(m["content"] for m in seen[-1][0] if m["role"] == "tool")
+    assert body.splitlines()[0] == "Replacement output from a hook"
 
 
 def test_large_file_preview_keeps_whitespace_in_visible_lines(bound_tool, workspace_dir):

@@ -13,9 +13,20 @@ from typing import TextIO
 
 
 @dataclass(frozen=True)
+class FileReadCoverage:
+    """Line range delivered by a bounded source read and the digest of its output."""
+
+    start_line: int
+    end_line: int
+    total_lines: int
+    result_sha256: str
+
+
+@dataclass(frozen=True)
 class FileReadObservation:
     path: str
     fingerprint: str
+    coverage: FileReadCoverage | None = None
 
 
 _observations: ContextVar[list[FileReadObservation] | None] = ContextVar(

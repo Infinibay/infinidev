@@ -1200,6 +1200,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
                 reference = ''
+                read_coverage_notice = ''
+                source = None
                 attachments: list[Any] = []
                 if max_calls and legacy_state.total_tool_calls >= max_calls:
                     body = json.dumps({'status': 'tool_budget_exhausted', 'executed': False})
@@ -1247,6 +1249,18 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         if call.function.name not in {'finish_turn', 'update_plan'}:
                             receipt['dispatches'] += 1
                             output_sha256 = hashlib.sha256(body.encode()).hexdigest()
+                            coverage = file_read.coverage if file_read is not None else None
+                            if (call.function.name == 'read_file' and coverage is not None
+                                    and coverage.result_sha256 == output_sha256):
+                                source = _evidence_source(
+                                    call.function.name, args, workspace_path, file_read)
+                                if source.file_fingerprint and source.requested_path:
+                                    path = json.dumps(source.requested_path, ensure_ascii=False)[1:-1]
+                                    read_coverage_notice = (
+                                        f'File read coverage: {path}, lines '
+                                        f'{coverage.start_line}–{coverage.end_line} '
+                                        f'of {coverage.total_lines} (partial).\n'
+                                    )
                             trace('tool_result', source='dispatcher',
                                   call_id_sha256=hashlib.sha256(call.id.encode()).hexdigest(),
                                   tool=call.function.name,
@@ -1291,8 +1305,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     if reference:
                         if call.function.name not in {'finish_turn', 'update_plan'}:
                             checkpoint_pending |= reference not in state.evidence_sources
-                            source = state.evidence_sources.get(reference) or _evidence_source(
-                                call.function.name, args, workspace_path, file_read)
+                            source = (state.evidence_sources.get(reference) or source
+                                      or _evidence_source(
+                                          call.function.name, args, workspace_path, file_read))
                             retain_evidence(reference, source)
                     if new_test and verification.result_matches_output:
                         verification.observation.locator = reference or None
@@ -1302,6 +1317,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     if output_retries == 1:
                         workspace_effect_since_cutoff |= workspace_effect
                 archive_metadata = {'_archive_reference': reference, '_archive_characters': len(body)}
+                body = read_coverage_notice + body
                 if reference:
                     body += '\n' + reference
                 if ctx.manual_tc:

@@ -1,7 +1,9 @@
 """Tool for reading file contents with optional line-range selection."""
 
+import hashlib
 import json
 import os
+from dataclasses import replace
 from typing import Type
 
 from pydantic import BaseModel, Field
@@ -9,7 +11,11 @@ from pydantic import BaseModel, Field
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.file.read_file_input import ReadFileInput
-from infinidev.tools.file.read_observation import read_observed_lines, record_file_read
+from infinidev.tools.file.read_observation import (
+    FileReadCoverage,
+    read_observed_lines,
+    record_file_read,
+)
 
 
 _TEXT_SAFE = frozenset(
@@ -280,7 +286,16 @@ class ReadFileTool(InfinibayBaseTool):
                     f"end of file ({total_lines} lines)."
                 )
             content = "\n".join(_numbered_lines(selected, start=start + 1))
-            desc = f"lines {start + 1}-{min(end, total_lines)} of {total_lines}"
+            last_line = start + len(selected)
+            desc = f"lines {start + 1}-{last_line} of {total_lines}"
+            if observation is not None and len(selected) < total_lines:
+                coverage = FileReadCoverage(
+                    start_line=start + 1,
+                    end_line=last_line,
+                    total_lines=total_lines,
+                    result_sha256=hashlib.sha256(content.encode()).hexdigest(),
+                )
+                observation = replace(observation, coverage=coverage)
         elif total_lines > _LARGE_FILE_LINE_THRESHOLD:
             # ── Large-file skeleton mode ──────────────────────────────
             # The model asked for the whole file but it's too big to inline
