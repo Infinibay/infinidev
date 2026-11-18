@@ -955,17 +955,20 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 receipt['closure'] = 'plain_text'
                 return outcome('answered', result.raw_content)
             unclosed_responses = 0
-            if any(call.function.name == 'finish_turn' for call in calls) and len(calls) != 1:
-                return outcome('failed', 'Conversation interrupted: finish_turn must be the only call.')
-            close_deferred = (calls[0].function.name == 'finish_turn'
+            mixed_close = len(calls) > 1 and any(call.function.name == 'finish_turn' for call in calls)
+            close_deferred = (not mixed_close and calls[0].function.name == 'finish_turn'
                               and engine._user_message_injector.has_pending)
-            if result.tool_call_origin == 'native' and not close_deferred:
+            if result.tool_call_origin == 'native' and not (close_deferred or mixed_close):
                 publish(result.raw_content)
             # Validate the entire transport batch before executing any of it.
             validated = []
             errors = {}
             unoffered = {}
             for call in calls:
+                if mixed_close and call.function.name == 'finish_turn':
+                    errors[call.id] = [{'type': 'finish_turn_requires_sole_call', 'loc': ('batch',),
+                                        'msg': 'finish_turn must be the only call in its batch.'}]
+                    continue
                 try:
                     validated.append((call, _validated_arguments(ctx, call)))
                 except _ToolNotOffered as exc:
@@ -1020,6 +1023,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                     'tool schemas for the full catalog. Correct any argument '
                                     'errors and resubmit the pending calls. '
                                     'No call in this batch executed.')
+                    if mixed_close:
+                        recovery = ('No call in this batch executed. Correct any argument or tool '
+                                    'name errors and retry the pending work without finish_turn. '
+                                    'After completing the work, call finish_turn by itself.')
                     body = json.dumps({'error': 'Tool batch rejected before execution.',
                         'executed': False, 'errors': errors.get(call.id, []),
                         **details, 'recovery': recovery}, ensure_ascii=False)

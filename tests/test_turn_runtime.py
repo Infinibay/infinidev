@@ -111,13 +111,17 @@ def test_post_tool_choice_keeps_explicit_close_and_tool_catalog(
 @pytest.mark.parametrize('calls', [
     [tc('finish_turn', message='Done'), tc('record', text='must not run')],
     [tc('record', text='must not run'), tc('finish_turn', message='Done')],
+    [tc('finish_turn', message='Done'), tc('finish_turn', message='Stopped')],
 ])
 def test_terminal_must_be_sole_call(runtime, calls):
     engine, agent, script, seen = runtime
-    script(reply('', *calls))
-    result = engine.run_turn(agent, 'Work')
+    script(*(reply('', *calls) for _ in range(3)))
+    result = engine.run_turn(agent, 'Work', max_iterations=0, max_total_tool_calls=0)
     assert result.status == 'failed'
-    assert result.metrics['tool_calls'] == 0
+    assert 'finish_turn_requires_sole_call' in result.message
+    assert len(seen) == 3
+    assert result.metrics['tool_calls'] == 6
+    assert engine._last_turn_receipt['dispatches'] == 0
     assert not result.state.finished
 
 
@@ -698,6 +702,56 @@ def test_invalid_batch_is_atomic_and_bounded(runtime):
     feedback = [m for m in seen[1][0] if m['role'] == 'tool']
     assert len(feedback) == 2
     assert all(json.loads(m['content'])['executed'] is False for m in feedback)
+
+
+@pytest.mark.parametrize('manual', [False, True])
+def test_mixed_finish_turn_batch_can_recover_atomically(runtime, monkeypatch, manual):
+    engine, agent, script, seen = runtime
+    executed = []
+    delivered = []
+
+    class ObservedTool(RecordTool):
+        def _run(self, text: str) -> str:
+            executed.append(text)
+            return text
+
+    if manual:
+        monkeypatch.setattr('infinidev.engine.turns.runtime.get_model_capabilities',
+            lambda: SimpleNamespace(supports_function_calling=False, supports_vision=False))
+
+    def action(*calls, content=''):
+        if manual:
+            return reply(json.dumps({'tool_calls': [
+                {'name': name, 'arguments': args} for name, args in calls
+            ]}))
+        return reply(content, *(tc(name, **args) for name, args in calls))
+
+    work = ('record', {'text': 'actual evidence'})
+    finish = ('finish_turn', {'message': 'Work observed.'})
+
+    def retry_work():
+        assert executed == []
+        assert delivered == []
+        roles = [message['role'] for message in seen[-1][0][-2:]]
+        assert roles == ['user' if manual else 'tool'] * 2
+        replies = [json.loads(message['content'].split('Result:\n', 1)[-1])
+                   for message in seen[-1][0][-2:]]
+        assert all(not item['executed'] for item in replies)
+        assert replies[0]['errors'] == []
+        assert replies[1]['errors'][0]['type'] == 'finish_turn_requires_sole_call'
+        assert all('finish_turn by itself' in item['recovery'] for item in replies)
+        return action(work)
+
+    script(action(work, finish, content='Premature completion.'), retry_work, action(finish))
+    result = engine.run_turn(agent, 'Work', task_tools=[ObservedTool()],
+                             on_public_message=delivered.append)
+
+    assert result.status == 'answered'
+    assert result.message == 'Work observed.'
+    assert delivered == []
+    assert executed == ['actual evidence']
+    assert result.metrics['tool_calls'] == 4
+    assert engine._last_turn_receipt['dispatches'] == 1
 
 
 @pytest.mark.parametrize('limit', [0, 1])

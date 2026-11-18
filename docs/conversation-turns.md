@@ -16,6 +16,11 @@ completes, blocks, or advances a work Task. `update_plan` supplies optional
 work items with stable IDs and explicit statuses; item titles carry no execution
 policy. Prior plans and notes are context for the current request.
 
+`finish_turn` closes only in a batch by itself. A batch containing it and
+another call is rejected before dispatch. The model receives structured
+feedback to retry the pending work and close separately. The ordinary
+tool budget and the fuse of three consecutive rejected batches apply.
+
 The conversational outcomes are `answered`, `exhausted`, `cancelled`, and `failed`.
 `answered` means the agent returned control to the user. Exhaustion preserves evidence
 and reports interruption. Host permissions, cancellation, and resource limits remain
