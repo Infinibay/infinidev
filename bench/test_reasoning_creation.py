@@ -89,6 +89,12 @@ _ORDER = (
     ("creation-choice", "timeout", False), ("creation-choice", "timeout", True),
     ("creation-choice", "queue", True), ("creation-choice", "queue", False),
     ("creation-choice", "label", False), ("creation-choice", "label", True),
+    ("effort", "timeout", False), ("effort", "timeout", True),
+    ("effort", "queue", True), ("effort", "queue", False),
+    ("effort", "label", False), ("effort", "label", True),
+    ("post-choice", "timeout", True), ("post-choice", "timeout", False),
+    ("post-choice", "queue", False), ("post-choice", "queue", True),
+    ("post-choice", "label", True), ("post-choice", "label", False),
 )
 
 
@@ -124,7 +130,7 @@ def test_creation(
         source: f"def {function}():\n    return {value}\n",
         f"archive/{Path(source).name}": f"def {function}():\n    return {decoy}\n",
     }
-    root = workspace_dir / "fixture"
+    root = (workspace_dir / "fixture").resolve()
     root.mkdir()
     monkeypatch.chdir(root)
     agent.workspace_path = str(root)
@@ -139,6 +145,11 @@ def test_creation(
              if not (factor == "catalog" and treatment and tool.name == "edit_file")]
     metadata = not (factor == "metadata" and treatment)
     temperature = 0.7 if factor == "temperature" and treatment else 0.2
+    effort = ("low" if treatment else "none") if factor == "effort" else None
+    post_tool_choice = "auto"
+    if factor == "post-choice":
+        effort = "none"
+        post_tool_choice = "required" if treatment else "auto"
     if factor == "scope" and treatment:
         monkeypatch.setattr(settings, "FILE_OPERATIONS_PERMISSION", "allowed_paths")
         monkeypatch.setattr(settings, "ALLOWED_FILE_PATHS", [str(root / destination)])
@@ -158,6 +169,12 @@ def test_creation(
             "LLM_NUM_RETRIES": 0, "LLM_TEMPERATURE": temperature,
         }.items():
             monkeypatch.setattr(settings, name, value)
+        if effort is not None:
+            monkeypatch.setattr(settings, "OPENAI_COMPATIBLE_TEMPLATE_EFFORT", True)
+            monkeypatch.setattr(settings, "THINKING_ENABLED", True)
+            monkeypatch.setattr(settings, "THINKING_BUDGET", effort)
+            selection = None if factor == "post-choice" and not treatment else post_tool_choice
+            monkeypatch.setattr(settings, "TASK_POST_TOOL_CHOICE", selection)
         monkeypatch.setattr(turn_runtime, "get_litellm_params", _REAL_PARAMS)
         monkeypatch.setattr(turn_runtime, "get_model_capabilities", _REAL_CAPABILITIES)
         monkeypatch.setattr(turn_runtime, "_get_model_max_context", lambda _: 262144)
@@ -187,6 +204,11 @@ def test_creation(
                 call("read_file", file_path=f"archive/{Path(source).name}"),
                 call("read_file", file_path=source, limit=0),
             ]
+        if factor == "post-choice":
+            monkeypatch.setenv("HOME", str(workspace_dir))
+            (workspace_dir / "outside.py").write_text("fixture sentinel\n")
+            before_source = [call("read_file", file_path="../outside.py"),
+                             call("read_file", file_path="~/outside.py")]
         script(*before_source,
                call("read_file", file_path=source),
                call("create_file", file_path=destination, content=content),
@@ -197,10 +219,13 @@ def test_creation(
     dispatches = []
     protected_writes = []
     permission_denials = []
+    path_rejections = []
     verified_destination = False
     source_observed = False
     named_request = None
     wire_choices = []
+    wire_efforts = []
+    reasoning_responses = 0
     creation_arguments = []
     named_create = {"type": "function", "function": {"name": "create_file"}}
     provider = turn_runtime.call_llm
@@ -215,9 +240,12 @@ def test_creation(
         return denial
 
     def observe_provider(params, messages, tools=None, **kwargs):
-        nonlocal named_request
+        nonlocal named_request, reasoning_responses
         if live:
             assert params["temperature"] == temperature
+            if effort is not None:
+                params = {**params, "seed": 147, "max_tokens": 4096,
+                          "extra_body": {**params["extra_body"], "reasoning_budget_tokens": 1536}}
         if (
             factor == "creation-choice" and treatment and source_observed
             and named_request is None and not (root / destination).exists()
@@ -225,9 +253,13 @@ def test_creation(
             named_request = len(offered)
             kwargs["tool_choice"] = named_create
         offered.append([tool["function"]["name"] for tool in tools or []])
-        return provider(params, messages, tools, **kwargs)
+        response = provider(params, messages, tools, **kwargs)
+        if live and effort is not None:
+            message = response.choices[0].message
+            reasoning_responses += bool(getattr(message, "reasoning_content", None))
+        return response
 
-    if live and factor == "creation-choice":
+    if live and (factor == "creation-choice" or effort is not None):
         send = httpx.Client.send
 
         def observe_http(client, request, *args, **kwargs):
@@ -235,6 +267,16 @@ def test_creation(
                 payload = json.loads(request.content)
                 if payload.get("stream"):
                     wire_choices.append(payload.get("tool_choice"))
+                    if effort is not None:
+                        template = payload["chat_template_kwargs"]
+                        assert template == ({"enable_thinking": True, "reasoning_effort": "low"}
+                                            if effort == "low" else {"enable_thinking": False})
+                        assert payload["seed"] == 147 and payload["temperature"] == 0.2
+                        assert payload["max_tokens"] == 4096
+                        assert payload["reasoning_budget_tokens"] == 1536
+                        if payload.get("tools"):
+                            assert payload["tool_choice"] in {"auto", post_tool_choice}
+                        wire_efforts.append(effort)
             return send(client, request, *args, **kwargs)
 
         monkeypatch.setattr(httpx.Client, "send", observe_http)
@@ -244,12 +286,16 @@ def test_creation(
         target = None
         previous = None
         if name in {"code_search", "read_file", "edit_file", "create_file"}:
-            path = (root / (args.get("file_path") or ".")).resolve()
-            if not path.is_relative_to(root.resolve()):
-                raise ValueError("Tool path escaped the fixture")
-            if ".infinidev" in path.relative_to(root.resolve()).parts:
-                raise ValueError("Tool path targets the benchmark's runtime state")
-            target = path.relative_to(root).as_posix()
+            path = (root / os.path.expanduser(args.get("file_path") or ".")).resolve()
+            if path.is_relative_to(root):
+                relative = path.relative_to(root)
+                if ".infinidev" not in relative.parts:
+                    target = relative.as_posix()
+            if target is None:
+                path_rejections.append(name)
+                return json.dumps({
+                    "error": "Use a source or destination inside the fixture workspace.",
+                })
             if name in {"edit_file", "create_file"}:
                 previous = path.read_bytes() if path.is_file() else None
             if name == "create_file" and factor == "creation-choice":
@@ -312,9 +358,13 @@ def test_creation(
         "closure": engine._last_turn_receipt["closure"], "metrics": result.metrics,
         "protected_writes": protected_writes,
         "permission_denials": permission_denials,
+        "path_rejections": path_rejections,
         "source_observed": source_observed,
         "named_request": named_request,
         "wire_choices": wire_choices,
+        "wire_efforts": wire_efforts,
+        "post_tool_choice": post_tool_choice if effort is not None else None,
+        "reasoning_responses": reasoning_responses,
         "creation_arguments": creation_arguments,
         "verified_destination": verified_destination,
         "complete_in_scope": match and verified_destination and not protected_writes
@@ -325,6 +375,8 @@ def test_creation(
     assert result.metrics["tool_calls"] <= 8
     if live and named_request is not None:
         assert wire_choices[named_request] == named_create
+    if live and effort is not None:
+        assert wire_efforts and len(wire_efforts) == len(wire_choices)
     if not live:
         assert match and exact and result.status == "answered"
         expected_calls = ["read_file", "create_file", "read_file", "finish_turn"]
@@ -338,6 +390,7 @@ def test_creation(
                 "path": destination, "content_source": "active", "source_observed_before": True,
             }]
         assert [entry["name"] for entry in dispatches] == expected_calls
+        assert path_rejections == (["read_file", "read_file"] if factor == "post-choice" else [])
         assert protected_writes == ([source, source] if factor == "scope" and not treatment else [])
         assert [row["path"] for row in permission_denials] == (
             [source, source] if factor == "scope" and treatment else []

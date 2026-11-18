@@ -396,8 +396,8 @@ class Settings(BaseSettings):
     # unlimited total calls. Local Step boundaries still compact accumulated
     # context, while the loop's non-progress guards remain independent.
     TASK_MAX_TOOL_CALLS: int = 0
-    # Native selection on principal requests after a tool attempt.
-    TASK_POST_TOOL_CHOICE: Literal["required", "auto"] = "required"
+    # Override the route's native selection after a principal tool attempt.
+    TASK_POST_TOOL_CHOICE: Literal["required", "auto"] | None = None
     # Principal turns can request read_file once after the first successful write.
     TASK_FIRST_WRITE_READBACK_ENABLED: bool = False
     # Report when a test in the principal turn predates the observed workspace.

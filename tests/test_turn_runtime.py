@@ -87,14 +87,24 @@ def test_tools_then_answer_and_full_repeated_catalog(runtime):
     assert all(s['function']['name'] != 'step_complete' for s in seen[0][1])
 
 
-@pytest.mark.parametrize('post_tool_choice', ['required', 'auto'])
+@pytest.mark.parametrize('provider,selection,post_tool_choice', [
+    ('openai_compatible', None, 'auto'),
+    ('anthropic', None, 'required'),
+    ('openai_compatible', 'required', 'required'),
+    ('anthropic', 'auto', 'auto'),
+])
 def test_post_tool_choice_keeps_explicit_close_and_tool_catalog(
-    runtime, monkeypatch, post_tool_choice,
+    runtime, monkeypatch, provider, selection, post_tool_choice,
 ):
     from infinidev.config.settings import settings
 
     engine, agent, script, seen = runtime
-    monkeypatch.setattr(settings, 'TASK_POST_TOOL_CHOICE', post_tool_choice)
+    monkeypatch.setattr(settings, 'LLM_PROVIDER', provider)
+    monkeypatch.setattr(settings, 'TASK_POST_TOOL_CHOICE', selection)
+    if provider == 'openai_compatible':
+        monkeypatch.setattr('infinidev.engine.turns.runtime.get_litellm_params', lambda: {
+            'model': 'custom_openai/scripted', 'api_base': 'http://localhost:8080/v1',
+        })
     script(reply('', tc('record', text='evidence')), reply('Here is progress.'),
            reply('', tc('finish_turn', message='Done.')))
     result = engine.run_turn(agent, 'Investigate')
@@ -1002,8 +1012,10 @@ def test_manual_trace_records_parsed_origin(runtime, monkeypatch):
     assert any(e['event'] == 'model_response' and e['origin'] == 'parsed_text' for e in events)
 
 
-def test_tool_phase_requests_a_call_and_traces_protocol_reminders(runtime):
+def test_tool_phase_requests_a_call_and_traces_protocol_reminders(runtime, monkeypatch):
+    from infinidev.config.settings import settings
     from infinidev.tools.base.db import get_connection
+    monkeypatch.setattr(settings, 'TASK_POST_TOOL_CHOICE', 'required')
     engine, agent, script, seen = runtime
     script(reply('', tc('record', text='observation')), reply('plain continuation'),
            reply('', tc('finish_turn', message='Done')))

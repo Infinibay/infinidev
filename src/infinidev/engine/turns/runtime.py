@@ -644,7 +644,6 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
     max_iterations = settings.LOOP_MAX_ITERATIONS if max_iterations is None else max_iterations
     max_calls = (settings.LOOP_MAX_TOTAL_TOOL_CALLS if max_total_tool_calls is None
                  else max_total_tool_calls)
-    post_tool_choice = settings.TASK_POST_TOOL_CHOICE
 
     def retain_evidence(reference: str, source: EvidenceSource | None = None) -> None:
         references.append(reference)
@@ -731,6 +730,10 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         params = get_litellm_params()
         if params is None:
             raise RuntimeError('No language model is configured')
+        post_tool_choice = settings.TASK_POST_TOOL_CHOICE
+        if post_tool_choice is None:
+            post_tool_choice = ('auto' if settings.LLM_PROVIDER == 'openai_compatible'
+                                else 'required')
         capabilities = get_model_capabilities()
         manual = not capabilities.supports_function_calling
         vision = bool(getattr(capabilities, 'supports_vision', False))

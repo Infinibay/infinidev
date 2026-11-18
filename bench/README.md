@@ -41,6 +41,8 @@ workspace tools and checks resolved paths against each fixture. Inspect
 artifact correctness, closure, budget, latency and tokens. No model text or
 tool bodies are written to the report. Use `-k profile`, `-k catalog` or
 `-k metadata`, `-k temperature` or `-k scope` to select one comparison.
+Use `-k 'effort or post-choice'` to compare reasoning effort and native
+tool selection independently with the same creation fixtures.
 
 The November 17 exploratory round used eight tool calls, nine model
 iterations and Qwen3.8-FN-UD-IQ4_XS. Each pair changed one factor:
@@ -209,6 +211,30 @@ never read the entire active source. All three controls read the active
 source and none called `create_file`. Complete delivery was 0/3 in both
 arms. This isolates one successful selection and argument generation, with
 scoring still based on final source, observed readback and closure.
+
+### Reasoning and native selection on creation tasks
+
+On Infinidev `a8fdd0a`, Qwen3.8-FN-UD-IQ4_XS over Adamant (`basalt 0.2.1`)
+ran the same three creation tasks at temperature 0.2 and seed 147. Each run
+had per-call metadata, a 4,096-token output cap, a 1,536-token reasoning
+budget and limits of nine model iterations and eight tool attempts. Wire
+checks verified the chosen thinking level and native tool selection.
+
+| Comparison | Conditions | Correct files | Complete with readback and closure |
+| --- | --- | ---: | ---: |
+| Reasoning effort | `auto`, thinking off | 3/3 | 3/3 |
+| Reasoning effort | `auto`, `low` | 3/3 | 3/3 |
+| Post-tool selection | Thinking off, `auto` | 3/3 | 3/3 |
+| Post-tool selection | Thinking off, `required` after the first attempt | 0/3 | 0/3 |
+
+In the first effort run, thinking off missed one destination readback. It
+met all three criteria in the repeat above. The first selection round was
+discarded because the fixture guard interrupted two turns after out-of-scope
+paths. With the guard returning an ordinary rejection, all three `required`
+turns exhausted their budgets. The offline controls verify that direct
+parent paths and home-relative paths are refused without stopping a turn.
+The principal now defaults to `auto` on OpenAI Compatible. Both modes can
+still be selected explicitly.
 
 ### Readback after an observed write
 
