@@ -40,7 +40,7 @@ workspace tools and checks resolved paths against each fixture. Inspect
 `CREATION_PROBE` rows for offered tools, dispatched tool names and hashes,
 artifact correctness, closure, budget, latency and tokens. No model text or
 tool bodies are written to the report. Use `-k profile`, `-k catalog` or
-`-k metadata` or `-k temperature` to select one comparison.
+`-k metadata`, `-k temperature` or `-k scope` to select one comparison.
 
 The November 17 exploratory round used eight tool calls, nine model
 iterations and Qwen3.8-FN-UD-IQ4_XS. Each pair changed one factor:
@@ -67,6 +67,19 @@ fixed. Two requests at 0 returned identical text hashes, and the request at
 1 returned a different hash. The server rejected invalid values of
 `temperature`, `top_p`, `top_k`, `min_p` and `seed` with field-specific
 HTTP 400 errors. Parameter support and programming quality are separate checks.
+
+The scope comparison authorizes the literal destination through the existing
+`allowed_paths` permission mode. The catalog and task stay fixed. The offline
+control attempts two edits to a protected file before successfully creating
+and reading the destination. Without a write restriction, the edits change
+and restore the protected file. With the restriction, both are denied. The
+benchmark reports actual permission denials separately from writes, and
+fails the scope criterion even if an unauthorized write is later reversed.
+It also checks that the agent rereads the complete destination after its final
+write. In two live pairs, one in reversed order, neither arm created the file
+and neither changed a protected file. The instrumented pair observed no
+permission denial, so the live result measures neither benefit nor harm from
+containment. The scripted control independently proves both denials.
 
 ### What a task record means
 

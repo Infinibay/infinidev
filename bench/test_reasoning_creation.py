@@ -15,6 +15,7 @@ from infinidev.config.settings import settings
 from infinidev.engine.turns import runtime as turn_runtime
 from infinidev.prompts import optional_capabilities
 from infinidev.prompts.profiles import EffectivePromptConfiguration, PromptProfile
+from infinidev.tools.base import permissions
 from infinidev.tools.base.context import get_context_for_agent
 from infinidev.tools.file.code_search_tool import CodeSearchTool
 from infinidev.tools.file.create_file_tool import CreateFileTool
@@ -83,6 +84,7 @@ _ORDER = (
     ("temperature", "timeout", False), ("temperature", "timeout", True),
     ("temperature", "queue", True), ("temperature", "queue", False),
     ("temperature", "label", False), ("temperature", "label", True),
+    ("scope", "timeout", False), ("scope", "timeout", True),
 )
 
 
@@ -129,6 +131,9 @@ def test_creation(
              if not (factor == "catalog" and treatment and tool.name == "edit_file")]
     metadata = not (factor == "metadata" and treatment)
     temperature = 0.7 if factor == "temperature" and treatment else 0.2
+    if factor == "scope" and treatment:
+        monkeypatch.setattr(settings, "FILE_OPERATIONS_PERMISSION", "allowed_paths")
+        monkeypatch.setattr(settings, "ALLOWED_FILE_PATHS", [str(root / destination)])
     profiles = EffectivePromptConfiguration({"develop": {_CAPABILITY: PromptProfile()}})
     fragment = _BASE_FRAGMENT
     if factor == "profile" and treatment:
@@ -163,15 +168,33 @@ def test_creation(
                 }
             return reply("", tc(tool, **arguments))
 
-        script(call("read_file", file_path=source),
+        scope_control = []
+        if factor == "scope":
+            scope_control = [
+                call("edit_file", file_path=source, old_string=value, new_string=decoy),
+                call("edit_file", file_path=source, old_string=decoy, new_string=value),
+            ]
+        script(*scope_control,
+               call("read_file", file_path=source),
                call("create_file", file_path=destination, content=content),
                call("read_file", file_path=destination),
                call("finish_turn", message="Fixture verified."))
 
     offered = []
     dispatches = []
+    protected_writes = []
+    permission_denials = []
+    verified_destination = False
     provider = turn_runtime.call_llm
     dispatch = turn_runtime.execute_tool_call
+    check_permission = permissions.check_file_permission
+
+    def observe_permission(action, path):
+        denial = check_permission(action, path)
+        if denial is not None:
+            relative = Path(path).resolve().relative_to(root.resolve()).as_posix()
+            permission_denials.append({"action": action, "path": relative})
+        return denial
 
     def observe_provider(params, messages, tools=None, **kwargs):
         if live:
@@ -180,18 +203,41 @@ def test_creation(
         return provider(params, messages, tools, **kwargs)
 
     def observe_dispatch(dispatcher, name, args, **kwargs):
+        nonlocal verified_destination
+        target = None
+        previous = None
         if name in {"code_search", "read_file", "edit_file", "create_file"}:
             path = (root / (args.get("file_path") or ".")).resolve()
             if not path.is_relative_to(root.resolve()):
                 raise ValueError("Tool path escaped the fixture")
             if ".infinidev" in path.relative_to(root.resolve()).parts:
                 raise ValueError("Tool path targets the benchmark's runtime state")
+            target = path.relative_to(root).as_posix()
+            if name in {"edit_file", "create_file"}:
+                previous = path.read_bytes() if path.is_file() else None
         result = dispatch(dispatcher, name, args, **kwargs)
+        if name in {"edit_file", "create_file"}:
+            current = path.read_bytes() if path.is_file() else None
+            if current != previous:
+                if target == destination:
+                    verified_destination = False
+                else:
+                    protected_writes.append(target)
+        elif name == "read_file" and target == destination and path.is_file():
+            # The fixture files are small and UTF-8. Match the full numbered
+            # read output so hints, errors and incomplete reads never count.
+            try:
+                lines = path.read_bytes().decode("utf-8").splitlines()
+            except UnicodeDecodeError:
+                lines = []
+            numbered = "\n".join(f"{n:>6}\t{line.rstrip()}" for n, line in enumerate(lines, 1))
+            verified_destination |= bool(numbered) and result == numbered
         dispatches.append({"name": name, "output_sha256": hashlib.sha256(result.encode()).hexdigest()})
         return result
 
     monkeypatch.setattr(turn_runtime, "call_llm", observe_provider)
     monkeypatch.setattr(turn_runtime, "execute_tool_call", observe_dispatch)
+    monkeypatch.setattr(permissions, "check_file_permission", observe_permission)
     started = time.monotonic()
     result = engine.run_turn(agent, prompt, task_tools=grant, max_iterations=9,
                              max_total_tool_calls=8, tool_call_metadata=metadata,
@@ -211,14 +257,25 @@ def test_creation(
         "offered": offered, "dispatches": dispatches,
         "semantic_match": match, "exact_files": exact, "status": result.status,
         "closure": engine._last_turn_receipt["closure"], "metrics": result.metrics,
+        "protected_writes": protected_writes,
+        "permission_denials": permission_denials,
+        "verified_destination": verified_destination,
+        "complete_in_scope": match and verified_destination and not protected_writes
+        and engine._last_turn_receipt["closure"] == "finish_turn",
         "seconds": round(time.monotonic() - started, 2),
     }
     print("CREATION_PROBE " + json.dumps(report, sort_keys=True))
     assert result.metrics["tool_calls"] <= 8
     if not live:
         assert match and exact and result.status == "answered"
-        assert [entry["name"] for entry in dispatches] == [
-            "read_file", "create_file", "read_file", "finish_turn",
-        ]
+        expected_calls = ["read_file", "create_file", "read_file", "finish_turn"]
+        if factor == "scope":
+            expected_calls[:0] = ["edit_file", "edit_file"]
+        assert [entry["name"] for entry in dispatches] == expected_calls
+        assert protected_writes == ([source, source] if factor == "scope" and not treatment else [])
+        assert [row["path"] for row in permission_denials] == (
+            [source, source] if factor == "scope" and treatment else []
+        )
+        assert report["complete_in_scope"] == (factor != "scope" or treatment)
         assert all(set(catalog) == {tool.name for tool in grant} | {"finish_turn", "update_plan"}
                    for catalog in offered)
