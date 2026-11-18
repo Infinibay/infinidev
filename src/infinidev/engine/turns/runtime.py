@@ -837,6 +837,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
               baseline_available=tracker.baseline is not None,
               baseline_files=len(tracker.baseline.files) if tracker.baseline else 0)
         context_repaired = False
+        output_limit_retried = False
         reported_archive_revisions: dict[str, str] = {}
         while True:
             if engine.is_cancelled:
@@ -942,6 +943,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             context_repaired = False
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
+            output_truncated = result.finish_reason == 'length'
+            reported_calls = [] if output_truncated else (result.tool_calls or [])
             trace('model_response', source='model', origin=result.tool_call_origin,
                   elapsed_ms=int((time.monotonic() - call_started) * 1000),
                   observed_prompt_tokens=legacy_state.total_prompt_tokens - usage_before[0],
@@ -951,11 +954,27 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                   content_bytes=len(result.raw_content.encode()),
                   calls=[{'id_sha256': hashlib.sha256(call.id.encode()).hexdigest(),
                           'tool': call.function.name}
-                         for call in result.tool_calls or []])
+                         for call in reported_calls])
             if reporting_only:
                 report = ('' if engine._user_message_injector.has_pending
                           else _budget_report_text(result))
                 return outcome('exhausted', _TOOL_LIMIT_MESSAGE + ('\n\n' + report if report else ''))
+            if output_truncated:
+                if output_limit_retried or (max_iterations and iterations >= max_iterations):
+                    return outcome('exhausted',
+                        'Conversation interrupted: model output token limit reached.')
+                output_limit_retried = True
+                notice = {'role': 'user', 'content':
+                          'Host: the previous response hit the model output limit and was '
+                          'discarded. No action from that response ran. Keep the next response '
+                          'short. If a tool is needed, send one complete call with fewer arguments '
+                          'or a smaller edit.'}
+                messages.append(notice)
+                if recorder is not None:
+                    recorder.attach(notice, recorder.source(
+                        'output_limit_recovery', 'user', notice['content']))
+                trace('output_limit_recovery', reason='length')
+                continue
             from infinidev.engine.hooks.hooks import HookContext, HookEvent, hook_manager
             hook_manager.dispatch(HookContext(
                 event=HookEvent.POST_MODEL_MESSAGE,
@@ -966,9 +985,6 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                           'agent_name': getattr(agent, 'role', agent.agent_id),
                           'task': user_input, 'plan_snapshot': _bounded_state(state)},
             ))
-            if result.finish_reason == 'length':
-                return outcome('exhausted',
-                    'Conversation interrupted: model output token limit reached.')
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
             calls = result.tool_calls or []

@@ -10,6 +10,8 @@ import threading
 
 import pytest
 
+from tests.test_turn_runtime import runtime
+
 
 @pytest.fixture
 def local_completion_endpoint(monkeypatch, tmp_path):
@@ -46,8 +48,17 @@ def local_completion_endpoint(monkeypatch, tmp_path):
                 self.end_headers()
                 self.wfile.write(failure)
                 return
-            function = {'name': 'finish_turn' if reply_name[0] == 'reject_named' else reply_name[0],
-                        'arguments': '{}'}
+            truncating = reply_name[0] == 'truncate_once' and index == 0
+            if reply_name[0] == 'truncate_once':
+                arguments = ('{"message":"partial body to discard' if truncating
+                             else '{"message":"Recovered."}')
+                function = {'name': 'finish_turn', 'arguments': arguments}
+            else:
+                function = {
+                    'name': 'finish_turn' if reply_name[0] == 'reject_named' else reply_name[0],
+                    'arguments': '{}',
+                }
+            reason = 'length' if truncating else 'tool_calls'
             call = {'id': 'synthetic-call', 'type': 'function', 'function': function}
             common = {'id': 'synthetic-completion', 'created': 1,
                       'model': 'Qwen3.8-FN-UD-IQ4_XS'}
@@ -58,7 +69,7 @@ def local_completion_endpoint(monkeypatch, tmp_path):
                                              'tool_calls': [{'index': 0, **call}]},
                         'finish_reason': None}]},
                     {**common, 'object': 'chat.completion.chunk', 'choices': [{
-                        'index': 0, 'delta': {}, 'finish_reason': 'tool_calls'}],
+                        'index': 0, 'delta': {}, 'finish_reason': reason}],
                         'usage': {'prompt_tokens': 10, 'completion_tokens': 2,
                                   'total_tokens': 12}},
                 ]
@@ -69,7 +80,7 @@ def local_completion_endpoint(monkeypatch, tmp_path):
                 raw_body = json.dumps({**common, 'object': 'chat.completion', 'choices': [{
                     'index': 0, 'message': {'role': 'assistant', 'content': None,
                                              'tool_calls': [call]},
-                    'finish_reason': 'tool_calls'}],
+                    'finish_reason': reason}],
                     'usage': {'prompt_tokens': 10, 'completion_tokens': 2,
                               'total_tokens': 12}}).encode()
                 content_type = 'application/json'
@@ -131,6 +142,34 @@ def synthetic_request(monkeypatch, endpoint, required_supported):
                 {'role': 'user', 'content': 'Synthetic prior state.'},
                 {'role': 'user', 'content': 'Synthetic request.'}]
     return messages, schemas
+
+
+def test_principal_retries_a_truncated_native_stream_with_the_same_request_limit(
+    runtime, monkeypatch, local_completion_endpoint,
+):
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.engine.turns import runtime as turn_runtime
+
+    endpoint, requests, reply_name, _ = local_completion_endpoint
+    synthetic_request(monkeypatch, endpoint, True)
+    reply_name[0] = 'truncate_once'
+    monkeypatch.setattr(turn_runtime, 'get_litellm_params',
+                        lambda: {**get_litellm_params(), 'max_tokens': 64})
+    engine, agent, _, _ = runtime
+
+    result = engine.run_turn(agent, 'Report briefly.', task_tools=[], max_iterations=2)
+
+    assert result.status == 'answered'
+    assert result.message == 'Recovered.'
+    assert result.metrics['tool_calls'] == 1
+    assert len(requests) == 2
+    first, second = [payload for _, payload, _ in requests]
+    assert first['max_tokens'] == second['max_tokens'] == 64
+    assert first['tools'] == second['tools']
+    assert second['stream'] is True
+    assert all(message['role'] != 'tool' for message in second['messages'])
+    assert 'partial body to discard' not in json.dumps(second['messages'])
+    assert 'output limit' in second['messages'][-1]['content']
 
 
 @pytest.mark.parametrize('stream', [False, True])

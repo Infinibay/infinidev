@@ -261,7 +261,7 @@ def test_followup_receives_host_interruption_without_private_model_content(runti
     engine, agent, script, seen = runtime
     script(reply('', tc('record', text='Observed evidence')),
            reply('incomplete output to omit', finish_reason='length'))
-    assert engine.run_turn(agent, 'Work').status == 'exhausted'
+    assert engine.run_turn(agent, 'Work', max_iterations=2).status == 'exhausted'
     engine.begin_turn()
     script(reply('I can continue.'))
     literal = 'Continue the previous work.'
@@ -690,7 +690,7 @@ def test_provider_length_limit_interrupts_without_executing_truncated_calls(
     truncated = reply(text, *calls, tokens=321)
     truncated.choices[0].finish_reason = 'length'
     script(reply('', tc('record', text='prior evidence')), truncated)
-    result = engine.run_turn(agent, 'Work')
+    result = engine.run_turn(agent, 'Work', max_iterations=2)
     assert result.status == 'exhausted'
     assert result.metrics['observed_iterations'] == 2
     assert result.metrics['observed_tool_calls'] == 1
@@ -698,6 +698,61 @@ def test_provider_length_limit_interrupts_without_executing_truncated_calls(
     assert result.metrics['observed_completion_tokens'] == 20
     assert any('prior evidence' in str(m.get('content')) for m in engine._last_turn_messages)
     assert 'Archived evidence' in str(engine._last_turn_messages)
+
+
+@pytest.mark.parametrize('manual', [False, True])
+def test_output_limit_recovers_without_replaying_partial_output(runtime, monkeypatch, manual):
+    engine, agent, script, seen = runtime
+    executed = []
+
+    class ObservedTool(RecordTool):
+        def _run(self, text: str) -> str:
+            executed.append(text)
+            return text
+
+    if manual:
+        monkeypatch.setattr('infinidev.engine.turns.runtime.get_model_capabilities',
+            lambda: SimpleNamespace(supports_function_calling=False, supports_vision=False))
+
+    def action(name, **arguments):
+        if manual:
+            return reply(json.dumps({'tool_calls': [{'name': name, 'arguments': arguments}]}))
+        return reply('', tc(name, **arguments))
+
+    truncated = action('record', text='partial action to discard')
+    truncated.choices[0].finish_reason = 'length'
+    if not manual:
+        truncated.choices[0].message.content = 'partial public answer to discard'
+    script(action('record', text='prior evidence'), truncated,
+           action('record', text='recovered action'), action('finish_turn', message='Done.'))
+
+    result = engine.run_turn(agent, 'Work', task_tools=[ObservedTool()], max_iterations=4,
+                             max_total_tool_calls=3)
+
+    assert result.status == 'answered'
+    assert result.metrics['observed_iterations'] == 4
+    assert result.metrics['observed_tool_calls'] == 3
+    assert executed == ['prior evidence', 'recovered action']
+    assert seen[2][1] == seen[1][1]
+    assert 'output limit' in seen[2][0][-1]['content']
+    assert 'No action from that response ran' in seen[2][0][-1]['content']
+    assert 'prior evidence' in str(seen[2][0])
+    assert 'to discard' not in str(seen[2][0])
+    assert result.public_messages == []
+
+
+def test_two_output_limits_end_the_turn_without_dispatch(runtime):
+    engine, agent, script, seen = runtime
+    truncated = reply('Incomplete answer.', finish_reason='length')
+    script(truncated, truncated)
+
+    result = engine.run_turn(agent, 'Work', max_iterations=0)
+
+    assert result.status == 'exhausted'
+    assert 'model output token limit' in result.message
+    assert len(seen) == 2
+    assert engine._last_turn_receipt['dispatches'] == 0
+    assert result.public_messages == []
 
 
 def test_actual_edit_emits_file_change_callback(runtime, auto_approve_permissions):

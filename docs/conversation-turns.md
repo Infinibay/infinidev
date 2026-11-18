@@ -33,6 +33,11 @@ has a request available, the principal can use one request with no tool
 schemas to report the observed results and remaining work. The turn still
 ends as `exhausted`, and that report adds no tool attempts.
 
+A response cut off by the provider output limit is discarded before dispatch
+or public delivery. With model requests left, the principal can try once more
+in the same turn and request a shorter answer or a smaller complete tool call.
+A second cutoff ends the turn as `exhausted` with prior evidence retained.
+
 ## Rollout paths
 
 | Entry | Runtime contract |
