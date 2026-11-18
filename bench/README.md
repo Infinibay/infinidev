@@ -86,6 +86,22 @@ and neither changed a protected file. The instrumented pair observed no
 permission denial, so the live result measures neither benefit nor harm from
 containment. The scripted control independently proves both denials.
 
+The `-k creation-choice` comparison uses the fixture oracle to request
+`create_file` by name once after a complete read of the unchanged active
+source. The candidate gets the same prompt and catalog as the control, with
+the choice verified at the HTTP boundary. The report records whether the
+arguments used the active value, the archive value or another expression.
+The offline control first reads the archive and then asks for an empty
+active-source slice. Neither read enables the request.
+
+In three live pairs, the selector fired in one candidate. It supplied the
+correct path and active value, then the model edited the destination into a
+different implementation without reading it back. The other two candidates
+never read the entire active source. All three controls read the active
+source and none called `create_file`. Complete delivery was 0/3 in both
+arms. This isolates one successful selection and argument generation, with
+scoring still based on final source, observed readback and closure.
+
 ### Readback after an observed write
 
 `INFINIDEV_TASK_FIRST_WRITE_READBACK_ENABLED=true` enables an experiment for

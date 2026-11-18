@@ -9,6 +9,7 @@ import socket
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 
 from infinidev.config.settings import settings
@@ -85,7 +86,17 @@ _ORDER = (
     ("temperature", "queue", True), ("temperature", "queue", False),
     ("temperature", "label", False), ("temperature", "label", True),
     ("scope", "timeout", False), ("scope", "timeout", True),
+    ("creation-choice", "timeout", False), ("creation-choice", "timeout", True),
+    ("creation-choice", "queue", True), ("creation-choice", "queue", False),
+    ("creation-choice", "label", False), ("creation-choice", "label", True),
 )
+
+
+def _same_ast(actual: bytes, expected: bytes) -> bool:
+    try:
+        return ast.dump(ast.parse(actual)) == ast.dump(ast.parse(expected))
+    except (SyntaxError, ValueError):
+        return False
 
 
 def _equivalent_files(actual: dict[str, bytes], initial: dict[str, bytes],
@@ -94,10 +105,7 @@ def _equivalent_files(actual: dict[str, bytes], initial: dict[str, bytes],
         return False
     if any(actual[name] != text for name, text in initial.items()):
         return False
-    try:
-        return ast.dump(ast.parse(actual[destination])) == ast.dump(ast.parse(content))
-    except SyntaxError:
-        return False
+    return _same_ast(actual[destination], content)
 
 
 @pytest.mark.parametrize(
@@ -168,13 +176,18 @@ def test_creation(
                 }
             return reply("", tc(tool, **arguments))
 
-        scope_control = []
+        before_source = []
         if factor == "scope":
-            scope_control = [
+            before_source = [
                 call("edit_file", file_path=source, old_string=value, new_string=decoy),
                 call("edit_file", file_path=source, old_string=decoy, new_string=value),
             ]
-        script(*scope_control,
+        if factor == "creation-choice":
+            before_source = [
+                call("read_file", file_path=f"archive/{Path(source).name}"),
+                call("read_file", file_path=source, limit=0),
+            ]
+        script(*before_source,
                call("read_file", file_path=source),
                call("create_file", file_path=destination, content=content),
                call("read_file", file_path=destination),
@@ -185,6 +198,11 @@ def test_creation(
     protected_writes = []
     permission_denials = []
     verified_destination = False
+    source_observed = False
+    named_request = None
+    wire_choices = []
+    creation_arguments = []
+    named_create = {"type": "function", "function": {"name": "create_file"}}
     provider = turn_runtime.call_llm
     dispatch = turn_runtime.execute_tool_call
     check_permission = permissions.check_file_permission
@@ -197,13 +215,32 @@ def test_creation(
         return denial
 
     def observe_provider(params, messages, tools=None, **kwargs):
+        nonlocal named_request
         if live:
             assert params["temperature"] == temperature
+        if (
+            factor == "creation-choice" and treatment and source_observed
+            and named_request is None and not (root / destination).exists()
+        ):
+            named_request = len(offered)
+            kwargs["tool_choice"] = named_create
         offered.append([tool["function"]["name"] for tool in tools or []])
         return provider(params, messages, tools, **kwargs)
 
+    if live and factor == "creation-choice":
+        send = httpx.Client.send
+
+        def observe_http(client, request, *args, **kwargs):
+            if str(request.url) == f"{_ENDPOINT}/chat/completions":
+                payload = json.loads(request.content)
+                if payload.get("stream"):
+                    wire_choices.append(payload.get("tool_choice"))
+            return send(client, request, *args, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, "send", observe_http)
+
     def observe_dispatch(dispatcher, name, args, **kwargs):
-        nonlocal verified_destination
+        nonlocal verified_destination, source_observed
         target = None
         previous = None
         if name in {"code_search", "read_file", "edit_file", "create_file"}:
@@ -215,6 +252,18 @@ def test_creation(
             target = path.relative_to(root).as_posix()
             if name in {"edit_file", "create_file"}:
                 previous = path.read_bytes() if path.is_file() else None
+            if name == "create_file" and factor == "creation-choice":
+                payload = args.get("content", "").encode("utf-8")
+                if _same_ast(payload, content.encode("utf-8")):
+                    content_source = "active"
+                elif _same_ast(payload, f"{constant} = {decoy}\n".encode("utf-8")):
+                    content_source = "decoy"
+                else:
+                    content_source = "other"
+                creation_arguments.append({
+                    "path": target, "content_source": content_source,
+                    "source_observed_before": source_observed,
+                })
         result = dispatch(dispatcher, name, args, **kwargs)
         if name in {"edit_file", "create_file"}:
             current = path.read_bytes() if path.is_file() else None
@@ -223,7 +272,7 @@ def test_creation(
                     verified_destination = False
                 else:
                     protected_writes.append(target)
-        elif name == "read_file" and target == destination and path.is_file():
+        elif name == "read_file" and target in {source, destination} and path.is_file():
             # The fixture files are small and UTF-8. Match the full numbered
             # read output so hints, errors and incomplete reads never count.
             try:
@@ -231,7 +280,11 @@ def test_creation(
             except UnicodeDecodeError:
                 lines = []
             numbered = "\n".join(f"{n:>6}\t{line.rstrip()}" for n, line in enumerate(lines, 1))
-            verified_destination |= bool(numbered) and result == numbered
+            read_complete = bool(numbered) and result == numbered
+            if target == source:
+                source_observed |= read_complete and path.read_bytes() == initial[source].encode()
+            else:
+                verified_destination |= read_complete
         dispatches.append({"name": name, "output_sha256": hashlib.sha256(result.encode()).hexdigest()})
         return result
 
@@ -259,6 +312,10 @@ def test_creation(
         "closure": engine._last_turn_receipt["closure"], "metrics": result.metrics,
         "protected_writes": protected_writes,
         "permission_denials": permission_denials,
+        "source_observed": source_observed,
+        "named_request": named_request,
+        "wire_choices": wire_choices,
+        "creation_arguments": creation_arguments,
         "verified_destination": verified_destination,
         "complete_in_scope": match and verified_destination and not protected_writes
         and engine._last_turn_receipt["closure"] == "finish_turn",
@@ -266,11 +323,20 @@ def test_creation(
     }
     print("CREATION_PROBE " + json.dumps(report, sort_keys=True))
     assert result.metrics["tool_calls"] <= 8
+    if live and named_request is not None:
+        assert wire_choices[named_request] == named_create
     if not live:
         assert match and exact and result.status == "answered"
         expected_calls = ["read_file", "create_file", "read_file", "finish_turn"]
         if factor == "scope":
             expected_calls[:0] = ["edit_file", "edit_file"]
+        if factor == "creation-choice":
+            expected_calls[:0] = ["read_file", "read_file"]
+            assert named_request == (3 if treatment else None)
+            assert source_observed
+            assert creation_arguments == [{
+                "path": destination, "content_source": "active", "source_observed_before": True,
+            }]
         assert [entry["name"] for entry in dispatches] == expected_calls
         assert protected_writes == ([source, source] if factor == "scope" and not treatment else [])
         assert [row["path"] for row in permission_denials] == (
