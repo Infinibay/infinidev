@@ -1715,10 +1715,13 @@ def _run_principal_turn(
     publish(result, final=True)
     receipt = getattr(engine, '_last_turn_receipt', None)
     if isinstance(receipt, dict):
+        test_revision = receipt.get('test_verification')
         hooks.on_status('info',
             f"Host record: {receipt['dispatches']} tool dispatches; "
             f"workspace changed: {bool(_turn_changed_files(engine))}; "
             f"closure: {receipt['closure']}; trace: {receipt['run_id']}.")
+        if test_revision is not None:
+            hooks.on_status('info', f"Host test result revision: {test_revision}.")
     if status != "answered":
         hooks.on_status("error" if status == "failed" else "warn",
                         f"Conversation status: {status}.")

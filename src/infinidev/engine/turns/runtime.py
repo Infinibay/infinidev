@@ -22,6 +22,7 @@ from infinidev.engine.engine_logging import emit_loop_event
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.formats.manual_tool_call import ManualToolCall
 from infinidev.engine.formats.tool_call_format import get_registered_formats
+from infinidev.engine.guidance.test_runners import is_test_command
 from infinidev.engine.llm_client import PERMANENT_ERRORS, call_llm
 from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.llm_call_result import LLMCallResult
@@ -39,6 +40,7 @@ from infinidev.engine.turns.action_metadata import ActionEnvelope, transport_sch
 from infinidev.engine.turns.catalog import effective_tools
 from infinidev.engine.turns.models import TurnResult, TurnState
 from infinidev.engine.turns.tools import build_turn_tools
+from infinidev.engine.turns.verification import TurnTestVerification, may_change_workspace
 from infinidev.engine.workspace_baseline import WorkspaceBaseline
 from infinidev.prompts.optional_capabilities import render_optional_capabilities
 from infinidev.prompts.profiles import EffectivePromptConfiguration
@@ -453,6 +455,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
     validation_diagnostics: list[str] = []
     unclosed_responses = 0
     receipt = {'run_id': uuid.uuid4().hex, 'closure': 'interrupted', 'dispatches': 0}
+    verification: TurnTestVerification | None = None
+    verification_dirty = False
     observer = current_observer()
     if observer is not None:
         observer.record('preparing', 'child_started', child_run_id=receipt['run_id'])
@@ -493,6 +497,13 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             message += '\n'.join(validation_diagnostics)
         if engine._last_file_tracker is not None:
             engine._last_file_tracker.reconcile_workspace()
+        if verification is not None and verification.status is not None:
+            if status == 'cancelled':
+                receipt['test_verification'] = 'unconfirmed'
+            else:
+                verification.refresh()
+                receipt['test_verification'] = verification.status
+            receipt['test_revision_snapshot_ms'] = verification.snapshot_ns // 1_000_000
         engine._last_state = legacy_state
         engine._last_status = status
         engine._last_total_tool_calls = legacy_state.total_tool_calls
@@ -553,6 +564,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             tracker = FileChangeTracker(baseline=WorkspaceBaseline.capture(workspace_path))
         baseline_elapsed_ms = int((time.monotonic() - baseline_started) * 1000)
         engine._last_file_tracker = tracker
+        if settings.TASK_TEST_REVISION_FEEDBACK_ENABLED:
+            verification = TurnTestVerification(tracker)
         set_loop_state(agent.agent_id, legacy_state)
         set_file_tracker(agent.agent_id, tracker)
         ctx = SimpleNamespace(agent=agent, agent_id=agent.agent_id, project_id=agent.project_id,
@@ -618,6 +631,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 return outcome('cancelled', 'Conversation cancelled.')
             if _drain_guidance(engine, messages, vision, _parent_guidance):
                 readback_pending = False
+                verification_dirty = True
             if max_iterations and iterations >= max_iterations:
                 return outcome('exhausted', 'Conversation interrupted: model call limit reached.')
             if max_calls and legacy_state.total_tool_calls >= max_calls:
@@ -625,6 +639,18 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             if ContextManager.under_context_pressure(legacy_state.last_prompt_tokens, window):
                 _compact(messages)
                 readback_pending = False
+            if verification is not None and verification_dirty:
+                verification_dirty = False
+                if verification.refresh():
+                    notice = {'role': 'user', 'content':
+                        'Host verification: the workspace changed after the last recognized '
+                        'test command returned exit 0. '
+                        'Rerun the relevant check if authorized and needed for your report.'}
+                    messages.append(notice)
+                    if recorder is not None:
+                        recorder.attach(notice, recorder.source(
+                            'workspace_verification', 'user', notice['content']))
+                    trace('test_verification_notice', status='stale')
             iterations += 1
             ctx.recording_iteration = iterations
             tool_choice: str | dict[str, Any] = (
@@ -826,6 +852,12 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         # Count attempts, including host-denied calls, against the global fuse.
                         legacy_state.total_tool_calls += 1
                         pre_content = capture_pre_content(call.function.name, args, tracker)
+                        command = args.get('command')
+                        test_attempt = (
+                            verification is not None and call.function.name == 'execute_command'
+                            and isinstance(command, str) and is_test_command(command, legacy_state)
+                        )
+                        revision_before = verification.snapshot() if test_attempt else None
                         if observer is not None:
                             observer.record('tool', 'tool_started', tool_name=call.function.name)
                         body = execute_tool_call(ctx.tool_dispatch, call.function.name, args,
@@ -850,6 +882,15 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                   output_bytes=len(body.encode()))
                         maybe_emit_file_change(call.function.name, args, body, pre_content,
                             tracker, agent.project_id, agent.agent_id, engine._hooks)
+                        if verification is not None:
+                            if test_attempt:
+                                verification.observe_test(
+                                    None if engine.is_cancelled else revision_before, body)
+                                verification_dirty = False
+                            elif verification.status == 'current':
+                                tool = ctx.tool_dispatch[call.function.name]
+                                verification_dirty |= may_change_workspace(
+                                    call.function.name, getattr(tool, 'effects', None))
                     finally:
                         engine._finish_tool_batch()
                     # Exact pages already identify their durable source. Re-archiving and

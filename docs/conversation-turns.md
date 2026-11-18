@@ -97,6 +97,20 @@ The tool catalog, grants and explicit `finish_turn` protocol still apply.
 If optional readback requests a named tool and the endpoint rejects that
 selector, its fallback honors the configured choice and provider capabilities.
 
+Set `INFINIDEV_TASK_TEST_REVISION_FEEDBACK_ENABLED=true` to observe test
+revisions within the principal turn. A recognised test command with an
+unambiguous zero exit is associated with the observed workspace when its
+before and after snapshots match. A later workspace change can add a
+host observation before the next request. The receipt and terminal show
+`current`, `stale`, or `unconfirmed` for the latest attempt. The receipt
+also records the time spent taking verification snapshots.
+
+The option is off by default. The model chooses whether to run another
+authorised check, and `finish_turn` remains available. The status describes
+the revision associated with the command result. A recognised command
+may be a wrapper or an invocation that never executes tests. Test
+execution and coverage require evidence from the runner itself.
+
 ## Action channels and continuity
 
 Native action authority comes only from the provider's tool_calls field. Native

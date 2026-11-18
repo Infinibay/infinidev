@@ -183,6 +183,23 @@ edit. The independent gate passed the final source. The agent did not rerun
 the suite on that revision or close the turn. These exploratory runs leave
 a benefit from the extra structure unproven.
 
+### Test revision feedback
+
+Two Qwen pairs used `cart-immutability` and `options-override` with real
+pytest commands in read-only, network-isolated fixtures. Both arms were
+asked to run the visible suite before editing and on the final revision.
+They kept native tool choice at `auto` and named readback off. Only the
+candidate enabled `INFINIDEV_TASK_TEST_REVISION_FEEDBACK_ENABLED`.
+
+The independent final gates passed all four artifacts, and all four runs
+executed the visible suite after their last edit. The control closed 1/2
+turns and the candidate closed 2/2. Each candidate received one stale-test
+observation and ended with the host's result marked current. Verification
+snapshots took 1 and 2 ms in the two small candidate fixtures. This sample
+supports keeping the option available for further evaluation. The
+experiment used an earlier wording for the notice. The released text
+identifies the observed zero exit explicitly.
+
 ### What a task record means
 
 ```json

@@ -72,6 +72,17 @@ def test_attachments_remain_separate_from_literal_input(boundary):
     assert boundary[1].run_turn.call_args.kwargs["initial_attachments"] == attachments
 
 
+def test_host_displays_test_revision_separately_from_the_answer(boundary):
+    _, engine, hooks = boundary
+    engine._last_turn_receipt = {
+        "dispatches": 2, "closure": "finish_turn", "run_id": "example",
+        "test_verification": "stale",
+    }
+
+    assert call(boundary) == "respuesta"
+    hooks.on_status.assert_any_call("info", "Host test result revision: stale.")
+
+
 def test_late_cancellation_preempts_answer(boundary, monkeypatch):
     engine = boundary[1]
     def run(*a, **kw):

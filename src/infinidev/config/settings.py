@@ -399,6 +399,8 @@ class Settings(BaseSettings):
     TASK_POST_TOOL_CHOICE: Literal["required", "auto"] = "required"
     # Principal turns can request read_file once after the first successful write.
     TASK_FIRST_WRITE_READBACK_ENABLED: bool = False
+    # Report when a test in the principal turn predates the observed workspace.
+    TASK_TEST_REVISION_FEEDBACK_ENABLED: bool = False
     # Steps are bounded by context pressure and progress evidence, not call count.
     # Zero keeps their tool surface open until completion, cancellation, or compaction.
     TASK_MAX_TOOL_CALLS_PER_STEP: int = 0
