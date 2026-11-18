@@ -302,6 +302,15 @@ its exact current value. The controls recalled the archive and returned the
 previous value in both trials. All four closed via `finish_turn`. This was
 one pair per fixture on Basalt with Qwen3.8-FN-UD-IQ4_XS.
 
+An in-turn follow-up scripted the initial read and exact recall, with an
+external edit between them. The live model received the original page in all
+four trials. The treatment also received the host revision notice after the
+page. Qwen3.8 on Basalt, at temperature 0.2 and seed 281, re-read the live
+file in both notice trials and neither control. One notice trial returned
+the exact current value in the requested format, compared with zero controls.
+All four closed via `finish_turn`. This measures the follow-up after a stale
+recall, with one run per fixture and arm.
+
 ### What a task record means
 
 ```json
