@@ -488,6 +488,14 @@ Measured turn time was 67.11 seconds without the excerpt and 65.64 with it.
 The four pairs used two reduced Rust fixtures, with three seeds on the
 first fixture. Source selection was supplied by the evaluator.
 
+A one-pair transport check then exercised the opt-in principal feature with
+a frozen structured Ken response and a live Qwen endpoint. The first HTTP
+request included the verified range and digest only when the feature was
+enabled. The Rust test passed and the turn closed in both arms. Model
+requests were 6 and 5, with 25,059 and 21,637 input tokens respectively.
+This checks the production context path. The measurement uses a replayed
+ranking and excludes live retrieval latency.
+
 ### What a task record means
 
 ```json

@@ -72,6 +72,22 @@ path. They do not customize `run_turn`. The principal honors the agent identity
 and backstory, repository `AGENTS.md` instructions, and enabled optional
 capabilities through its conversational prompt.
 
+## Verified source at turn start
+
+Set `INFINIDEV_TASK_KEN_SOURCE_CONTEXT_ENABLED=true` to opt in. The
+principal can use this when Ken and MCP are enabled, the workspace is local,
+and the current tool grant includes the built-in `read_file`.
+
+The first principal pass asks Ken for up to two symbol results using the
+literal request. The host checks the reported SHA-256 against the current
+workspace file and reconstructs the selected line ranges from those local
+bytes. It sends up to 6,000 bytes of JSON as a separate advisory context
+block before the literal request. The block marks partial selections and
+identifies the source revision observed at load time.
+
+If no excerpt can be verified, the turn starts with its usual context and
+tools. The opt-in adds one Ken lookup before the first model request.
+
 ## Execution provenance
 
 The host archives `turn_provenance` records in working memory with a unique run ID.

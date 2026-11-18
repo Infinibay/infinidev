@@ -400,6 +400,8 @@ class Settings(BaseSettings):
     TASK_POST_TOOL_CHOICE: Literal["required", "auto"] | None = None
     # Principal turns can request read_file once after the first successful write.
     TASK_FIRST_WRITE_READBACK_ENABLED: bool = False
+    # Supply verified excerpts from structured Ken results at principal turn start.
+    TASK_KEN_SOURCE_CONTEXT_ENABLED: bool = False
     # Report when a test in the principal turn predates the observed workspace.
     TASK_TEST_REVISION_FEEDBACK_ENABLED: bool = False
     # Steps are bounded by context pressure and progress evidence, not call count.

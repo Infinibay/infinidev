@@ -57,6 +57,7 @@ from infinidev.prompts.project_instructions import render_project_instructions
 from infinidev.tools.base.context import (
     bind_tools_to_agent, get_context_for_agent, set_file_tracker, set_loop_state,
 )
+from infinidev.tools.file.read_file_tool import ReadFileTool
 from infinidev.tools.file.read_observation import (
     FileReadObservation, capture_file_reads, file_fingerprint,
 )
@@ -807,6 +808,20 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 node = recorder.bundle('conversation_message', 'conversation_context', 'user',
                                        messages[-1]['content'], [parent] if parent else [])
                 recorder.attach(messages[-1], node)
+        if (
+            settings.TASK_KEN_SOURCE_CONTEXT_ENABLED and settings.KEN_SESSION_ENABLED
+            and settings.MCP_ENABLED and not settings.SANDBOX_ENABLED
+            and not preserve_file_tracker and workspace_path and user_input.strip()
+            and isinstance(ctx.tool_dispatch.get('read_file'), ReadFileTool)
+            and not engine.is_cancelled
+        ):
+            from infinidev.engine.turns.source_context import verified_ken_source_context
+
+            if source_context := verified_ken_source_context(user_input, workspace_path):
+                messages.append({'role': 'user', 'content': source_context})
+                if recorder is not None:
+                    recorder.attach(messages[-1], recorder.source(
+                        'ken', 'user', source_context, public_digest=False))
         prior = _bounded_state(state)
         if state.previous_interruption is not None:
             prior['previous_interruption'] = state.previous_interruption.model_dump(exclude_none=True)
