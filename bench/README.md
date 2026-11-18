@@ -189,6 +189,15 @@ arms. These small samples support keeping the switch available for evaluation
 with the default off. A named request does not certify that the model read the
 right path or checked the whole artifact.
 
+Two follow-up pairs on Qwen3.8 over Basalt scripted a successful write and
+either an unrelated read or a `limit=0` warning. Both the updated experiment
+and ordinary automatic selection then read the target in 2/2 cases. The
+updated experiment used the named selector with the target `file_path` and
+its replies matched the requested exact format in 2/2 cases, compared with
+0/2 controls. All four closed via `finish_turn`, preserved the scripted
+artifact, and used three live requests per trial. This compares the combination
+of named selection and path guidance with one trial per arm and fixture.
+
 ### Automatic selection after tool results
 
 Five paired Qwen trials on frozen fixtures compared `required` after the
