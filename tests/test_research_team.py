@@ -270,13 +270,15 @@ def test_workspace_writers_are_serialized(team):
 
 
 def test_idle_releases_worker_capacity_and_writer_lease_for_a_peer_reply(team):
-    sleeping = threading.Event()
+    alice_has_slot = threading.Event()
+    bob_registered = threading.Event()
     resumed = []
 
     def runner(runtime, member, ticket, assignment):
         runtime.poll(member["id"])
         if member["name"] == "Alice":
-            sleeping.set()
+            alice_has_slot.set()
+            assert bob_registered.wait(2)
             result = runtime.idle(member["id"], events=["message"], sender="Bob", timeout=2)
             resumed.append(result)
         else:
@@ -284,11 +286,11 @@ def test_idle_releases_worker_capacity_and_writer_lease_for_a_peer_reply(team):
         return "Report", "completed"
 
     runtime = team(runner=runner, max_workers=1)
-    # Register Bob while Alice still owns the sole execution slot.
-    with runtime._lock:
-        _delegate(runtime, _ticket(runtime), name="Alice", tools=["create_file"])
-        _delegate(runtime, _ticket(runtime), name="Bob", tools=["create_file"])
-    assert sleeping.wait(2)
+    # Keep Alice in the sole slot until Bob is registered as the expected sender.
+    _delegate(runtime, _ticket(runtime), name="Alice", tools=["create_file"])
+    assert alice_has_slot.wait(2)
+    _delegate(runtime, _ticket(runtime), name="Bob", tools=["create_file"])
+    bob_registered.set()
     _finish(runtime)
     assert resumed[0]["reason"] == "event"
     assert resumed[0]["events"][0]["content"] == "Source checked"
