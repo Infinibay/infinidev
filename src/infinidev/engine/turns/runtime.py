@@ -442,13 +442,14 @@ def _call(
     ctx: Any, caller: LLMCaller, messages: list[dict[str, Any]],
     *, tool_choice: str | dict[str, Any],
     named_choice_fallback: Literal['required', 'auto'],
+    offered_schemas: list[dict[str, Any]],
+    budget_report: bool,
 ) -> LLMCallResult:
-    reporting_only = tool_choice == 'none'
-    schemas = None if ctx.manual_tc or reporting_only else ctx.tool_schemas
+    schemas = None if ctx.manual_tc else offered_schemas or None
     recorder = current_recorder()
     if recorder is not None:
         recorder.request(ctx.recording_run_id, ctx.recording_iteration, messages,
-                         [] if reporting_only else ctx.tool_schemas,
+                         offered_schemas,
                          mode='manual' if ctx.manual_tc else 'function_calling')
     measurement = [{k: v for k, v in message.items()
                     if k not in {'_recording_source', '_action_metadata'}}
@@ -459,7 +460,7 @@ def _call(
                           if not key.startswith('_')} for message in messages]
     response = call_llm(ctx.llm_params, provider_messages, schemas, tool_choice=tool_choice,
         named_choice_fallback=named_choice_fallback,
-        retry_attempts=1 if reporting_only else None,
+        retry_attempts=1 if budget_report else None,
         use_json_mode=False,
         on_request_metadata=ctx.on_request_metadata,
         on_thinking_chunk=caller._on_thinking_chunk,
@@ -889,6 +890,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
         prior_verification_status = verification.status if verification is not None else None
         read_repetition = ReadRepetitionGuard()
         read_archives: dict[str, str] = {}
+        skipped_at_tool_limit = False
         while True:
             if engine.is_cancelled:
                 return outcome('cancelled', 'Conversation cancelled.')
@@ -920,14 +922,23 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             tool_choice: str | dict[str, Any] = (
                 post_tool_choice if legacy_state.total_tool_calls else 'auto'
             )
+            offered_schemas = ctx.tool_schemas
             if reporting_only:
-                tool_choice = 'none'
-                messages[0]['content'] += ('\n\nWhen the host requests a budget report, answer '
-                                          'in plain text without calling tools.')
+                offered_schemas = [] if skipped_at_tool_limit else [
+                    schema for schema in ctx.tool_schemas
+                    if schema['function']['name'] == 'finish_turn'
+                ]
+                tool_choice = 'auto' if offered_schemas else 'none'
+                close_instruction = (
+                    'Only finish_turn is available. Use it to end the turn, or use plain text '
+                    'to report that work was interrupted.'
+                    if offered_schemas else 'Respond with a plain-text report.'
+                )
+                messages[0]['content'] += '\n\nFor the budget report: ' + close_instruction
                 notice = {'role': 'user', 'content':
-                          'Host: the tool call limit has been reached. Summarize the work and '
-                          'results already observed, including unfinished work. No tools are '
-                          'available for this report.'}
+                          'The tool call limit has been reached. Summarize the work and '
+                          'results already observed, including unfinished work. '}
+                notice['content'] += close_instruction
                 paths = tracker.reconcile_workspace()
                 if paths is not None:
                     notice['content'] += '\n' + WorkspaceChangeSummary.from_paths(paths).render()
@@ -975,15 +986,16 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 request_messages = [*request_messages, notice]
             trace('runtime_request', mode='manual' if ctx.manual_tc else 'function_calling',
                   requested_tool_choice=tool_choice,
-                  finish_turn_offered=not reporting_only and any(
-                      s['function']['name'] == 'finish_turn' for s in ctx.tool_schemas),
+                  finish_turn_offered=any(
+                      s['function']['name'] == 'finish_turn' for s in offered_schemas),
                   message_roles=[m['role'] for m in request_messages], reminder=unclosed_responses)
             ctx.on_request_metadata = lambda metadata: trace('provider_request', **metadata)
             usage_before = (legacy_state.total_prompt_tokens, legacy_state.total_completion_tokens)
             call_started = time.monotonic()
             try:
                 result = _call(ctx, caller, request_messages, tool_choice=tool_choice,
-                               named_choice_fallback=post_tool_choice)
+                               named_choice_fallback=post_tool_choice,
+                               offered_schemas=offered_schemas, budget_report=reporting_only)
             except Exception as exc:
                 if engine.is_cancelled:
                     return outcome('cancelled', 'Conversation cancelled.')
@@ -1026,7 +1038,11 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                   calls=[{'id_sha256': hashlib.sha256(call.id.encode()).hexdigest(),
                           'tool': call.function.name}
                          for call in reported_calls])
-            if reporting_only:
+            if reporting_only and not (
+                offered_schemas and len(reported_calls) == 1
+                and reported_calls[0].function.name == 'finish_turn'
+                and not engine._user_message_injector.has_pending
+            ):
                 report = ('' if engine._user_message_injector.has_pending
                           else _budget_report_text(result))
                 return outcome('exhausted', _TOOL_LIMIT_MESSAGE + ('\n\n' + report if report else ''))
@@ -1098,7 +1114,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
             mixed_close = len(calls) > 1 and any(call.function.name == 'finish_turn' for call in calls)
             close_deferred = (not mixed_close and calls[0].function.name == 'finish_turn'
                               and engine._user_message_injector.has_pending)
-            if result.tool_call_origin == 'native' and not (close_deferred or mixed_close):
+            if (result.tool_call_origin == 'native'
+                    and not (close_deferred or mixed_close or reporting_only)):
                 publish(result.raw_content)
             # Validate the entire transport batch before executing any of it.
             validated = []
@@ -1122,6 +1139,9 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                                        [{'type': 'invalid_arguments',
                                          'msg': str(exc)[:500]}])
             if errors:
+                if reporting_only:
+                    trace('tool_budget_close_rejected', reason='invalid_arguments')
+                    return outcome('exhausted', _TOOL_LIMIT_MESSAGE)
                 invalid_batches += 1
                 legacy_state.total_tool_calls += len(calls)
                 name_details = {call_id: _tool_name_details(exc.name, exc.offered_names)
@@ -1178,6 +1198,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                         'Conversation interrupted: tool validation failed in 3 batches.')
                 continue
             invalid_batches = 0
+            if reporting_only and result.tool_call_origin == 'native' and not close_deferred:
+                publish(result.raw_content)
             action = _action_message(ctx, result, calls)
             if tool_call_metadata and not close_deferred:
                 declarations = [{'tool': call.function.name, 'metadata':
@@ -1203,7 +1225,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                 read_coverage_notice = ''
                 source = None
                 attachments: list[Any] = []
-                if max_calls and legacy_state.total_tool_calls >= max_calls:
+                if max_calls and legacy_state.total_tool_calls >= max_calls and not reporting_only:
+                    skipped_at_tool_limit = True
                     body = json.dumps({'status': 'tool_budget_exhausted', 'executed': False})
                 elif call.function.name == 'finish_turn' and engine._user_message_injector.has_pending:
                     body = 'Turn close deferred because a new user message arrived. '
@@ -1222,7 +1245,7 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     try:
                         if engine.is_cancelled:
                             engine._tool_cancel_event.set()
-                        # Count attempts, including host-denied calls, against the global fuse.
+                        # Count attempts, including the final close after the work limit.
                         legacy_state.total_tool_calls += 1
                         if observer is not None:
                             observer.record('tool', 'tool_started', tool_name=call.function.name)
@@ -1341,6 +1364,8 @@ def run_turn(engine: Any, agent: Any, user_input: str, *, turn_context: str = ''
                     else:
                         receipt['closure'] = 'finish_turn'
                         return outcome('answered', state.reply or '')
+            if reporting_only:
+                return outcome('exhausted', _TOOL_LIMIT_MESSAGE)
             if checkpoint_pending:
                 persist_work(checkpoint=True)
             read_repetition.observe_batch(read_batch)

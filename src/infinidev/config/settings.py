@@ -395,6 +395,8 @@ class Settings(BaseSettings):
     # A durable Task is progress-bounded, not call-count-bounded. Zero means
     # unlimited total calls. Local Step boundaries still compact accumulated
     # context, while the loop's non-progress guards remain independent.
+    # At a finite limit, the existing final report may explicitly close the
+    # turn when the limit did not skip any actions. The report runs no work tools.
     TASK_MAX_TOOL_CALLS: int = 0
     # Override the route's native selection after a principal tool attempt.
     TASK_POST_TOOL_CHOICE: Literal["required", "auto"] | None = None

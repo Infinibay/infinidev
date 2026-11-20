@@ -161,6 +161,8 @@ def test_global_budget_stops_inside_batch(runtime):
     assert result.metrics['tool_calls'] == 1
     assert result.dispatched_tools == {'record': 1}
     assert engine._last_turn_receipt['dispatches'] == 1
+    assert seen[1][1] is None
+    assert seen[1][2]['tool_choice'] == 'none'
     assert 'The second item is pending.' in result.message
     records = seen[1][0][-3:-1]
     assert [message['role'] for message in records] == ['tool', 'tool']
@@ -170,12 +172,61 @@ def test_global_budget_stops_inside_batch(runtime):
     }
 
 
+@pytest.mark.parametrize('manual', [False, True])
+def test_exact_work_limit_preserves_explicit_finish(runtime, workspace_dir, monkeypatch, manual):
+    from infinidev.tools.file.read_file_tool import ReadFileTool
+
+    engine, agent, script, seen = runtime
+    if manual:
+        monkeypatch.setattr('infinidev.engine.turns.runtime.get_model_capabilities',
+            lambda: SimpleNamespace(supports_function_calling=False, supports_vision=False))
+
+    def action(name, **arguments):
+        if manual:
+            return reply(json.dumps({'tool_calls': [{'name': name, 'arguments': arguments}]}))
+        return reply('', tc(name, **arguments))
+
+    (workspace_dir / 'one.txt').write_text('alpha\n')
+    (workspace_dir / 'two.txt').write_text('beta\n')
+    final = 'Read both files: alpha and beta.'
+    script(action('read_file', file_path='one.txt'), action('read_file', file_path='two.txt'),
+           action('finish_turn', message=final))
+    result = engine.run_turn(agent, 'Read both files in two reads, then finish.',
+                             task_tools=[ReadFileTool()], max_total_tool_calls=2, max_iterations=3)
+    assert result.status == 'answered'
+    assert result.message == final
+    assert result.dispatched_tools == {'read_file': 2, 'finish_turn': 1}
+    assert engine._last_turn_receipt['dispatches'] == 2
+    assert engine._last_turn_receipt['closure'] == 'finish_turn'
+    assert len(seen) == 3
+    if manual:
+        assert seen[-1][1] is None
+    else:
+        assert [schema['function']['name'] for schema in seen[-1][1]] == ['finish_turn']
+
+
 def test_iteration_budget(runtime):
     engine, agent, script, seen = runtime
     script(reply('', tc('record', text='evidence')))
     result = engine.run_turn(agent, 'Work', max_iterations=1, max_total_tool_calls=1)
     assert result.status == 'exhausted'
     assert len(seen) == 1
+
+
+def test_budget_close_with_pending_guidance_keeps_both_messages_private(runtime):
+    engine, agent, script, seen = runtime
+
+    def guidance_while_closing():
+        engine.inject_message('Use newer instructions')
+        return reply('Stale companion', tc('finish_turn', message='Stale result'))
+
+    script(reply('', tc('record', text='observed')), guidance_while_closing)
+    result = engine.run_turn(agent, 'Work', max_total_tool_calls=1)
+    assert result.status == 'exhausted'
+    assert result.dispatched_tools == {'record': 1}
+    assert 'Stale result' not in result.message
+    assert result.public_messages == []
+    assert len(seen) == 2
 
 
 @pytest.mark.parametrize("reporting_request", [True, False])
@@ -214,6 +265,7 @@ def test_exhaustion_reports_distinct_net_workspace_changes(
 
 @pytest.mark.parametrize('report_kind', [
     'plain', 'action', 'fenced_action', 'with_example', 'truncated', 'transport_failure',
+    'invalid_finish', 'mixed_finish', 'truncated_finish',
 ])
 def test_tool_budget_allows_one_report_without_additional_dispatch(runtime, report_kind):
     engine, agent, script, seen = runtime
@@ -235,6 +287,11 @@ def test_tool_budget_allows_one_report_without_additional_dispatch(runtime, repo
         'with_example': reply(report + '\n\n' + envelope),
         'truncated': reply(report, finish_reason='length'),
         'transport_failure': TimeoutError('Budget report unavailable.'),
+        'invalid_finish': reply('Unobserved success.', tc('finish_turn', message='')),
+        'mixed_finish': reply('Unobserved success.', tc('finish_turn', message=report),
+                              tc('record', text='must not run')),
+        'truncated_finish': reply('Unobserved success.', tc('finish_turn', message=report),
+                                  finish_reason='length'),
     }
     script(reply('', tc('record', text='configuration observed')), answers[report_kind])
     result = engine.run_turn(agent, 'Work', task_tools=[ObservedTool()],
@@ -244,12 +301,13 @@ def test_tool_budget_allows_one_report_without_additional_dispatch(runtime, repo
     assert result.metrics['tool_calls'] == 1
     assert len(seen) == 2
     assert engine._last_turn_receipt['dispatches'] == 1
-    assert seen[1][1] is None
-    assert seen[1][2]['tool_choice'] == 'none'
+    assert [schema['function']['name'] for schema in seen[1][1]] == ['finish_turn']
+    assert seen[1][2]['tool_choice'] == 'auto'
     assert seen[1][0][-2]['content'].startswith('configuration observed')
     assert executed == ['configuration observed']
     assert (report in result.message) is (report_kind in {'plain', 'with_example'})
     assert (envelope in result.message) is (report_kind == 'with_example')
+    assert 'Unobserved success.' not in result.public_messages
     assert 'tool call limit' in result.message
 
 
